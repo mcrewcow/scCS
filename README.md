@@ -1,6 +1,6 @@
 # scCS — Single-Cell Commitment Scores
 
-[![Documentation Status](https://readthedocs.org/projects/sccs-py/badge/?version=latest)](https://sccs.readthedocs.io/en/latest/)
+[![Documentation Status](https://readthedocs.org/projects/sccs-py/badge/?version=latest)](https://sccs-py.readthedocs.io/en/latest/)
 
 **scCS** computes RNA velocity-based commitment scores for single-cell data,
 generalizing the 2-state (homeostatic/activated) framework from
