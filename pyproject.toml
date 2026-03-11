@@ -24,6 +24,13 @@ velocity = ["scvelo>=0.2.5"]
 enrichment = ["gseapy>=1.0"]
 all = ["scvelo>=0.2.5", "gseapy>=1.0"]
 dev = ["pytest>=7.0", "pytest-cov"]
-
+docs = [
+    "sphinx>=7.0",
+    "sphinx-autoapi>=3.0",
+    "furo",
+    "numpydoc",
+    "nbsphinx",
+    "ipykernel",
+]
 [tool.pytest.ini_options]
 testpaths = ["tests"]

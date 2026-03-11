@@ -1,17 +1,18 @@
-.. scCS documentation master file, created by
-   sphinx-quickstart on Wed Mar 11 16:44:20 2026.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+scCS — Single-Cell Commitment Scores
+=====================================
 
-scCS documentation
-==================
-
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
-
+**scCS** computes RNA velocity-based commitment scores for single-cell
+data, generalizing the 2-state framework from Kriukov et al. (2025) to
+arbitrary k-furcations.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Contents
 
+   scCS_tutorial
+
+Indices
+-------
+
+* :ref:`genindex`
+* :ref:`modindex`
