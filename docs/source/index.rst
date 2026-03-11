@@ -1,15 +1,15 @@
 scCS — Single-Cell Commitment Scores
 =====================================
 
-**scCS** computes RNA velocity-based commitment scores for single-cell
-data, generalizing the 2-state framework from Kriukov et al. (2025) to
-arbitrary k-furcations.
-
 .. toctree::
    :maxdepth: 2
    :caption: Contents
 
+   introduction
+   requirements
    scCS_tutorial
+   api
+   changelog
 
 Indices
 -------
