@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scCS"
+version = "0.2.0"
+description = "Single-cell Commitment Scores with radial star embedding"
+authors = [{ name = "Emil Kriukov" }]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=1.5",
+    "scipy>=1.10",
+    "anndata>=0.9",
+    "scanpy>=1.9",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "scikit-learn>=1.2",
+]
+
+[project.optional-dependencies]
+velocity = ["scvelo>=0.2.5"]
+enrichment = ["gseapy>=1.0"]
+all = ["scvelo>=0.2.5", "gseapy>=1.0"]
+dev = ["pytest>=7.0", "pytest-cov"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
