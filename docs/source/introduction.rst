@@ -39,11 +39,31 @@ For k fates, a full k×k pairwise matrix of unCS and nCS is computed.
 Per-cell scores are derived from the dot product of each cell's velocity
 vector with the unit direction toward each fate centroid.
 
-The **commitment entropy** H summarizes how evenly distributed velocity is
-across all fates:
+Entropy Metrics
+---------------
 
-- H = 0 → all velocity points toward one fate (maximally committed)
-- H = 1 → velocity evenly distributed across all fates (uncommitted)
+scCS provides three complementary entropy metrics, each answering a different
+question about commitment uncertainty:
+
+**Population entropy** (single scalar)
+    How evenly is total velocity mass distributed across fate sectors?
+    ``H_pop = 0`` → all mass in one sector; ``H_pop = 1`` → uniform.
+    Note: can be misleadingly high for split-committed populations where
+    cells are individually decisive but split between fates.
+
+**Per-fate cell entropy** (shape ``(k,)``)
+    For each fate *j*: how individually decisive are cells about fate *j*?
+    Computed as the mean binary entropy of each cell's affinity score
+    ``s_ij`` treated as ``[s_ij, 1−s_ij]``, averaged over all cells.
+    Low → cells are sharply committed (or sharply not committed) to fate *j*.
+    High → cells are ambiguous about fate *j* (scores cluster near 0.5).
+
+**NN-smoothed per-cell entropy** (shape ``(n_cells,)``)
+    For each cell: average ``cell_scores`` over its *k* nearest neighbors
+    in the scCS embedding (``X_sccs``), then compute k-way Shannon entropy
+    on the smoothed scores. Removes single-cell velocity noise while
+    preserving local commitment structure. Use
+    ``plot_nn_entropy_elbow()`` to choose the optimal *k*.
 
 Workflow
 --------
@@ -53,21 +73,30 @@ Workflow
     AnnData (with scVelo velocity)
            │
            ▼
-    CommitmentScorer(adata, cluster_key)
+    CommitmentScorer(adata, bifurcation_cluster, terminal_cell_types)
            │
-           ├── build_embedding()   → radial star layout in obsm['X_sccs']
+           ├── build_embedding()      → radial star layout in obsm['X_sccs']
            │
-           ├── score()             → CommitmentScoreResult
-           │     ├── M_sector      (per-fate velocity magnitude)
-           │     ├── pairwise_unCS (k×k unnormalized scores)
-           │     ├── pairwise_nCS  (k×k cell-count corrected scores)
-           │     ├── cell_scores   (per-cell fate affinities)
-           │     └── commitment_entropy
+           ├── fit()                  → builds FateMap, projects velocity
            │
-           ├── plot_star()         → radial embedding visualization
-           ├── plot_commitment_bar() → unCS/nCS bar chart
-           ├── plot_expression_trends() → gene expression vs CS axis
-           └── get_velocity_drivers()   → ranked driver genes per fate
+           ├── score(k_nn=15)         → CommitmentScoreResult
+           │     ├── M_sector         (per-fate velocity magnitude)
+           │     ├── pairwise_unCS    (k×k unnormalized scores)
+           │     ├── pairwise_nCS     (k×k cell-count corrected scores)
+           │     ├── cell_scores      (per-cell fate affinities)
+           │     ├── population_entropy   (scalar)
+           │     ├── per_fate_entropy     (shape k)
+           │     └── nn_cell_entropy      (shape n_cells)
+           │
+           ├── plot_star()                → radial embedding visualization
+           ├── plot_commitment_bar()      → unCS/nCS bar chart
+           ├── plot_rose()                → polar velocity magnitude plot
+           ├── plot_pairwise_cs()         → k×k heatmap
+           ├── plot_nn_entropy_elbow()    → choose optimal k_nn
+           ├── plot_expression_trends()   → gene expression vs CS axis
+           ├── get_velocity_drivers()     → ranked driver genes per fate
+           ├── get_deg_drivers()          → DEG analysis per fate arm
+           └── get_enrichment()           → pathway enrichment per fate
 
 Citation
 --------

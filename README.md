@@ -1,6 +1,6 @@
 # scCS — Single-Cell Commitment Scores
 
-[![PyPI](https://img.shields.io/pypi/v/scCS-py)](https://pypi.org/project/scCS-kriukov)
+[![PyPI](https://img.shields.io/pypi/v/scCS-py)](https://pypi.org/project/scCS-py)
 [![Documentation Status](https://readthedocs.org/projects/sccs-py/badge/?version=latest)](https://sccs-py.readthedocs.io/en/latest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 

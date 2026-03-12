@@ -9,7 +9,11 @@ scCS requires **Python ≥ 3.9**.
 Installation
 ------------
 
-From GitHub (latest)::
+From PyPI (recommended)::
+
+    pip install scCS-py
+
+From GitHub (latest development version)::
 
     pip install git+https://github.com/mcrewcow/scCS.git
 
@@ -52,15 +56,12 @@ These are installed automatically with scCS:
    * - scanpy
      - ≥ 1.9
      - Single-cell preprocessing, neighbors
-   * - scvelo
-     - ≥ 0.3
-     - RNA velocity computation
+   * - scikit-learn
+     - ≥ 1.2
+     - NN entropy computation, GMM fate detection
    * - statsmodels
      - ≥ 0.14
      - LOWESS smoothing in expression trends
-   * - scikit-learn
-     - ≥ 1.2
-     - GMM fate detection, clustering
 
 Optional Dependencies
 ---------------------
@@ -72,20 +73,21 @@ Optional Dependencies
    * - Package
      - Version
      - Purpose
+   * - scvelo
+     - ≥ 0.2.5
+     - RNA velocity computation
    * - gseapy
      - ≥ 1.0
      - Pathway enrichment (KEGG, GO BP, Reactome)
    * - cellrank
      - ≥ 2.0
      - CellRank-based fate detection
-   * - leidenalg
-     - any
-     - Leiden clustering for fate detection
 
 Install optional dependencies::
 
-    pip install gseapy          # pathway enrichment
-    pip install cellrank        # CellRank fate detection
+    pip install scCS-py[velocity]     # scvelo
+    pip install scCS-py[enrichment]   # gseapy
+    pip install scCS-py[all]          # everything
 
 Docs Dependencies
 -----------------

@@ -6,7 +6,7 @@ project = "scCS"
 author = "Emil Kriukov"
 version = "0.3.2"
 release = "0.3.2"
-copyright = "2026, Emil Kriukov, bnv-lab.org"
+copyright = "2026, Emil Kriukov"
 html_logo = "_static/logo.png"
 extensions = [
     "sphinx.ext.autodoc",
