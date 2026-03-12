@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "scCS"
+name = "scCS-py"
 version = "0.3.2"
 description = "Single-cell Commitment Scores with radial star embedding"
 authors = [{ name = "Emil Kriukov" }]
@@ -34,3 +34,8 @@ docs = [
 ]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+[
+project.urls
+]
+Homepage = "https://github.com/mcrewcow/scCS"
+Documentation = "https://sccs-py.readthedocs.io"
