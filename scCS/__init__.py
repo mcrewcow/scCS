@@ -43,7 +43,7 @@ For k=2 (reproducing manuscript):
 >>> # result.pairwise_nCS[0, 1] should be ~8.066 (manuscript value)
 """
 
-__version__ = "0.3.2"
+__version__ = "0.3.2.1"
 __author__ = "Emil Kriukov"
 
 # Main API
