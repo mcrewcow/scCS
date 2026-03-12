@@ -34,8 +34,6 @@ docs = [
 ]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-[
-project.urls
-]
+[project.urls]
 Homepage = "https://github.com/mcrewcow/scCS"
 Documentation = "https://sccs-py.readthedocs.io"
