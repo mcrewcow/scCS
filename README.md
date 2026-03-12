@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/scCS-py)](https://pypi.org/project/scCS-py)
 [![Documentation Status](https://readthedocs.org/projects/sccs-py/badge/?version=latest)](https://sccs-py.readthedocs.io/en/latest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI]](https://github.com/mcrewcow/scCS/actions/workflows/python-package.yml/badge.svg)
+[![CI](https://github.com/mcrewcow/scCS/actions/workflows/python-package.yml/badge.svg)](https://github.com/mcrewcow/scCS/actions/workflows/python-package.yml)
 
 **scCS** quantifies RNA velocity-based commitment scores for single-cell data,
 generalizing the 2-state (homeostatic/activated) framework from
