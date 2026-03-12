@@ -35,7 +35,7 @@ differentiated), pass invert_metric=True.
 """
 
 from __future__ import annotations
-
+import anndata
 import warnings
 from typing import List, Optional, Tuple, Union
 
