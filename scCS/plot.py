@@ -228,6 +228,129 @@ def plot_star_embedding(
     return fig
 
 
+def plot_nn_entropy_elbow(
+    scorer,
+    k_nn_range: Union[List[int], range] = range(5, 51, 5),
+    color_map: Optional[Dict[str, str]] = None,
+    figsize: Tuple[float, float] = (12, 5),
+    title: Optional[str] = None,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Elbow plots for choosing the optimal number of nearest neighbors (k_nn).
+
+    Sweeps over ``k_nn_range``, computing NN-smoothed cell entropy at each k,
+    and produces two side-by-side subplots:
+
+    - **Left**: mean NN entropy across all cells vs k_nn.
+    - **Right**: mean NN entropy per fate arm vs k_nn (one line per fate).
+
+    Use these plots to identify the elbow — the k_nn where entropy stabilizes,
+    indicating that additional smoothing no longer changes the signal.
+
+    Parameters
+    ----------
+    scorer : CommitmentScorer
+        A fitted scorer with ``build_embedding()`` and ``fit()`` already called.
+        ``score(compute_cell_level=True)`` must have been called at least once
+        so that ``cell_scores`` are available.
+    k_nn_range : list or range
+        k_nn values to sweep.  Default: 5, 10, 15, ..., 50.
+    color_map : dict, optional
+        Fate name -> hex color.  Falls back to the default FATE_PALETTE.
+    figsize : tuple
+    title : str, optional
+        Overall figure title.  Defaults to "NN Entropy Elbow".
+    save_path : str, optional
+        If provided, save figure to this path.
+
+    Returns
+    -------
+    fig : matplotlib Figure
+
+    Examples
+    --------
+    >>> scorer.build_embedding(differentiation_metric='pseudotime')
+    >>> scorer.fit()
+    >>> result = scorer.score(compute_cell_level=True)
+    >>> fig = scorer.plot_nn_entropy_elbow(result)
+    """
+    from .scores import compute_nn_cell_entropy, compute_cell_scores
+
+    if scorer._fate_map is None or not scorer._fitted:
+        raise RuntimeError("scorer must be fitted before plotting elbow.")
+    if scorer._vx is None:
+        raise RuntimeError("Velocity vectors not loaded. Call fit() or load_velocity_vectors().")
+
+    fate_map = scorer._fate_map
+    fate_names = fate_map.fate_names
+    k_fates = fate_map.k
+    coords = np.array(scorer.adata_sub.obsm["X_sccs"])
+
+    # Compute cell_scores once
+    cell_scores = compute_cell_scores(
+        scorer._vx, scorer._vy,
+        fate_map.fate_centroids,
+        fate_map.root_centroid,
+    )
+
+    # Fate arm membership for per-fate means
+    cluster_labels = scorer.adata_sub.obs[scorer.cluster_key].astype(str).values
+    fate_masks = {
+        name: cluster_labels == name
+        for name in fate_names
+    }
+
+    k_nn_list = list(k_nn_range)
+    mean_all = []
+    mean_per_fate = {name: [] for name in fate_names}
+
+    for k in k_nn_list:
+        nn_ent = compute_nn_cell_entropy(cell_scores, coords, k)
+        mean_all.append(nn_ent.mean())
+        for name in fate_names:
+            mask = fate_masks[name]
+            mean_per_fate[name].append(nn_ent[mask].mean() if mask.any() else float("nan"))
+
+    # Colors
+    colors = _fate_colors(fate_names, color_map)
+
+    sns.set_theme(style="ticks")
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    fig.suptitle(title or "NN Entropy Elbow", fontsize=13, y=1.01)
+
+    # --- Left: overall mean ---
+    ax = axes[0]
+    ax.plot(k_nn_list, mean_all, color="#333333", linewidth=2, marker="o",
+            markersize=5, label="All cells")
+    ax.set_xlabel("k (nearest neighbors)", fontsize=11)
+    ax.set_ylabel("Mean NN-smoothed entropy", fontsize=11)
+    ax.set_title("Overall", fontsize=11)
+    ax.set_xticks(k_nn_list)
+    ax.tick_params(axis="x", rotation=45)
+    sns.despine(ax=ax)
+
+    # --- Right: per-fate means ---
+    ax = axes[1]
+    for name in fate_names:
+        ax.plot(k_nn_list, mean_per_fate[name],
+                color=colors[name], linewidth=2, marker="o",
+                markersize=5, label=name)
+    ax.set_xlabel("k (nearest neighbors)", fontsize=11)
+    ax.set_ylabel("Mean NN-smoothed entropy", fontsize=11)
+    ax.set_title("Per fate", fontsize=11)
+    ax.set_xticks(k_nn_list)
+    ax.tick_params(axis="x", rotation=45)
+    ax.legend(frameon=False, fontsize=9)
+    sns.despine(ax=ax)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # 8. Expression trends along commitment axis
 # ---------------------------------------------------------------------------

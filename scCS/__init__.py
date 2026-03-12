@@ -43,7 +43,7 @@ For k=2 (reproducing manuscript):
 >>> # result.pairwise_nCS[0, 1] should be ~8.066 (manuscript value)
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.2"
 __author__ = "Emil Kriukov"
 
 # Main API
@@ -71,7 +71,12 @@ from .scores import (
     compute_unCS,
     compute_nCS,
     compute_commitment_vector,
-    compute_commitment_entropy,
+    # Entropy
+    compute_population_entropy,      # aggregate velocity-mass entropy
+    compute_mean_cell_entropy,       # mean per-cell k-way entropy
+    compute_per_fate_cell_entropy,   # per-fate binary cell entropy, shape (k,)
+    compute_nn_cell_entropy,         # NN-smoothed per-cell entropy, shape (n_cells,)
+    compute_commitment_entropy,      # backward-compat alias for compute_population_entropy
     compute_pairwise_cs_matrix,
     compute_cell_scores,
 )
@@ -98,6 +103,7 @@ from .plot import (
     plot_commitment_heatmap,
     plot_subset_comparison,
     plot_expression_trends,
+    plot_nn_entropy_elbow,
 )
 
 __all__ = [
@@ -122,7 +128,11 @@ __all__ = [
     "compute_unCS",
     "compute_nCS",
     "compute_commitment_vector",
-    "compute_commitment_entropy",
+    "compute_population_entropy",
+    "compute_mean_cell_entropy",
+    "compute_per_fate_cell_entropy",
+    "compute_nn_cell_entropy",
+    "compute_commitment_entropy",   # backward-compat alias
     "compute_pairwise_cs_matrix",
     "compute_cell_scores",
     # Driver genes
@@ -140,4 +150,5 @@ __all__ = [
     "plot_commitment_heatmap",
     "plot_subset_comparison",
     "plot_expression_trends",
+    "plot_nn_entropy_elbow",
 ]
