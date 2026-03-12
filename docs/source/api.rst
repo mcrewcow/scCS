@@ -52,6 +52,7 @@ to preserve your original scanpy/Seurat cluster colors.
 .. autofunction:: scCS.plot_pairwise_cs
 .. autofunction:: scCS.plot_commitment_heatmap
 .. autofunction:: scCS.plot_subset_comparison
+.. autofunction:: scCS.plot_nn_entropy_elbow
 
 Embedding
 ---------
@@ -62,3 +63,26 @@ Fate Detection
 --------------
 
 .. autofunction:: scCS.build_fate_map
+
+Core Math — Entropy
+-------------------
+
+.. autofunction:: scCS.compute_population_entropy
+.. autofunction:: scCS.compute_mean_cell_entropy
+.. autofunction:: scCS.compute_per_fate_cell_entropy
+.. autofunction:: scCS.compute_nn_cell_entropy
+
+Core Math — Scores
+------------------
+
+.. autofunction:: scCS.compute_unCS
+.. autofunction:: scCS.compute_nCS
+.. autofunction:: scCS.compute_commitment_vector
+.. autofunction:: scCS.compute_pairwise_cs_matrix
+.. autofunction:: scCS.compute_cell_scores
+.. autofunction:: scCS.compute_magnitudes
+.. autofunction:: scCS.compute_angles
+.. autofunction:: scCS.bin_angles
+.. autofunction:: scCS.equal_sectors
+.. autofunction:: scCS.centroid_sectors
+.. autofunction:: scCS.compute_sector_magnitudes

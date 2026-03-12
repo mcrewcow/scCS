@@ -4,7 +4,8 @@ sys.path.insert(0, os.path.abspath("../.."))
 
 project = "scCS"
 author = "Emil Kriukov"
-release = "0.2.2"
+version = "0.3.2"
+release = "0.3.2"
 copyright = "2026, Emil Kriukov"
 html_logo = "_static/logo.png"
 extensions = [
@@ -32,5 +33,15 @@ napoleon_numpy_docstring = True
 napoleon_google_docstring = False
 
 html_theme = "furo"
-html_title = "scCS"
+html_title = f"scCS v{release}"
 html_static_path = ["_static"]
+html_theme_options = {
+    "light_css_variables": {
+        "color-brand-primary": "#0072B2",
+        "color-brand-content": "#0072B2",
+    },
+}
+# Show "vX.Y.Z" under the project name in the sidebar
+html_context = {
+    "version": release,
+}
