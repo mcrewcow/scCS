@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scCS"
-version = "0.2.0"
+version = "0.3.2"
 description = "Single-cell Commitment Scores with radial star embedding"
 authors = [{ name = "Emil Kriukov" }]
 requires-python = ">=3.9"

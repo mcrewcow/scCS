@@ -58,7 +58,11 @@ from .scores import (
     bin_angles,
     centroid_sectors,
     compute_cell_scores,
-    compute_commitment_entropy,
+    compute_commitment_entropy,       # backward-compat alias
+    compute_mean_cell_entropy,
+    compute_nn_cell_entropy,
+    compute_per_fate_cell_entropy,
+    compute_population_entropy,
     compute_commitment_vector,
     compute_magnitudes,
     compute_angles,
@@ -364,6 +368,7 @@ class CommitmentScorer:
         self,
         cell_mask: Optional[np.ndarray] = None,
         compute_cell_level: bool = True,
+        k_nn: Optional[int] = None,
         verbose: bool = True,
     ) -> CommitmentScoreResult:
         """Compute commitment scores for the full population or a subset.
@@ -376,6 +381,15 @@ class CommitmentScorer:
             Per-cell scores are still computed for all cells.
         compute_cell_level : bool
             Whether to compute per-cell fate affinity scores.
+            When True, ``result.mean_cell_entropy``, ``result.per_fate_entropy``,
+            and (if k_nn is set) ``result.nn_cell_entropy`` are populated.
+            When False, these fields are NaN / None.
+        k_nn : int, optional
+            If set, compute NN-smoothed per-cell entropy using this many
+            nearest neighbors in the scCS embedding (X_sccs).
+            Result stored in ``result.nn_cell_entropy`` and
+            ``adata_sub.obs['cs_nn_entropy']``.
+            Use ``scorer.plot_nn_entropy_elbow()`` to choose a good value.
         verbose : bool
 
         Returns
@@ -427,9 +441,9 @@ class CommitmentScorer:
                 len(idx) for idx in fate_map.fate_cell_indices
             ], dtype=float)
 
-        # 6. Commitment vector and entropy
+        # 6. Commitment vector and population-level entropy
         commitment_vector = compute_commitment_vector(M_sector)
-        entropy = compute_commitment_entropy(commitment_vector)
+        pop_entropy = compute_population_entropy(commitment_vector)
 
         # 7. Pairwise CS matrices
         pairwise_unCS = compute_pairwise_cs_matrix(M_sector, normalized=False)
@@ -437,25 +451,43 @@ class CommitmentScorer:
             M_sector, n_cells_per_fate=n_cells_per_fate, normalized=True
         )
 
-        # 8. Per-cell scores
+        # 8. Per-cell scores, per-fate entropy, NN entropy
         cell_scores = None
+        mean_cell_ent = float("nan")
+        per_fate_ent = np.full(fate_map.k, float("nan"))
+        nn_ent = None
+
         if compute_cell_level:
             cell_scores = compute_cell_scores(
                 vx, vy,
                 fate_map.fate_centroids,
                 fate_map.root_centroid,
             )
-            # Write back to adata_sub.obs
+
+            # Global mean per-cell entropy
+            mean_cell_ent = compute_mean_cell_entropy(cell_scores)
+
+            # Per-fate binary cell entropy — shape (k,)
+            per_fate_ent = compute_per_fate_cell_entropy(cell_scores)
+
+            # Write per-cell fate scores and raw entropy to adata_sub.obs
             for j, name in enumerate(fate_map.fate_names):
                 self.adata_sub.obs[f"cs_{name}"] = cell_scores[:, j]
             self.adata_sub.obs["cs_dominant_fate"] = [
                 fate_map.fate_names[int(np.argmax(cell_scores[i]))]
                 for i in range(len(cell_scores))
             ]
-            self.adata_sub.obs["cs_entropy"] = [
-                compute_commitment_entropy(cell_scores[i])
-                for i in range(len(cell_scores))
-            ]
+            k_fates = cell_scores.shape[1]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                log_s = np.where(cell_scores > 0, np.log(cell_scores), 0.0)
+            per_cell_H = -np.sum(cell_scores * log_s, axis=1) / np.log(k_fates)
+            self.adata_sub.obs["cs_entropy"] = per_cell_H
+
+            # NN-smoothed entropy
+            if k_nn is not None and k_nn > 0:
+                coords = np.array(self.adata_sub.obsm["X_sccs"])
+                nn_ent = compute_nn_cell_entropy(cell_scores, coords, k_nn)
+                self.adata_sub.obs["cs_nn_entropy"] = nn_ent
 
         result = CommitmentScoreResult(
             fate_names=fate_map.fate_names,
@@ -465,12 +497,16 @@ class CommitmentScorer:
             M_sector=M_sector,
             n_cells_per_fate=n_cells_per_fate,
             commitment_vector=commitment_vector,
-            commitment_entropy=entropy,
+            population_entropy=pop_entropy,
+            mean_cell_entropy=mean_cell_ent,
+            per_fate_entropy=per_fate_ent,
             pairwise_unCS=pairwise_unCS,
             pairwise_nCS=pairwise_nCS,
             cell_scores=cell_scores,
             fate_angles=fate_angles,
             cell_obs_names=np.array(self.adata_sub.obs_names),
+            nn_cell_entropy=nn_ent,
+            nn_k=k_nn,
         )
 
         if verbose:
@@ -593,6 +629,26 @@ class CommitmentScorer:
         """Compare commitment scores across subsets."""
         from .plot import plot_subset_comparison
         return plot_subset_comparison(subset_results, **kwargs)
+
+    def plot_nn_entropy_elbow(self, **kwargs):
+        """Elbow plots for choosing k_nn for NN-smoothed entropy.
+
+        Sweeps k_nn values and plots mean NN entropy (all cells) and per fate.
+        Call after fit().  Requires no prior score() call.
+
+        Parameters
+        ----------
+        k_nn_range : list or range, optional
+            k_nn values to sweep.  Default: range(5, 51, 5).
+        **kwargs
+            Passed to :func:`scCS.plot.plot_nn_entropy_elbow`.
+
+        Returns
+        -------
+        fig : matplotlib Figure
+        """
+        from .plot import plot_nn_entropy_elbow
+        return plot_nn_entropy_elbow(self, **kwargs)
 
     # ------------------------------------------------------------------
     # Driver genes
