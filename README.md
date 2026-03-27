@@ -7,7 +7,7 @@
 [![CI](https://github.com/mcrewcow/scCS/actions/workflows/python-package.yml/badge.svg)](https://github.com/mcrewcow/scCS/actions/workflows/python-package.yml)
 
 **scCS** quantifies RNA velocity-based commitment scores for single-cell data,
-generalizing the 2-state (homeostatic/activated) framework from
+generalizing the 2-state framework from
 Kriukov et al. (2025) to arbitrary **k-furcations** — branching points where
 a progenitor population splits into k ≥ 2 terminal fates.
 
