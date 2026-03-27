@@ -13,22 +13,45 @@ to any number of cell fates (k-furcations), with:
 - Cells ordered along arms by differentiation metric (pseudotime,
   CytoTRACE2, pathway score, or any custom per-cell score)
 - Population-level scores: unCS, nCS, commitment vector, entropy
-- Per-cell fate affinity scores
+- Per-cell fate affinity scores with magnitude weighting
+- Bootstrap confidence intervals on CS values
+- Multi-condition analysis (MultiConditionScorer)
 
-Quick start
------------
+Quick start — single condition
+-------------------------------
 >>> import scCS
 >>> scorer = scCS.CommitmentScorer(
 ...     adata,
-...     bifurcation_cluster='17',          # leiden cluster at the bifurcation
+...     bifurcation_cluster='17',
 ...     terminal_cell_types=['FateA', 'FateB', 'FateC'],
 ...     cluster_key='leiden',
 ... )
 >>> scorer.build_embedding(differentiation_metric='pseudotime')
+>>> scorer.rebuild_embedding_with_subset_pseudotime()   # fix arm coverage
 >>> scorer.fit()
->>> result = scorer.score()
+>>> result = scorer.score(n_bootstrap=500)
 >>> print(result.summary())
 >>> scorer.plot_star(result)
+>>> scorer.transfer_labels(adata, result)               # write back to full adata
+
+Quick start — multi-condition
+------------------------------
+>>> mscorer = scCS.MultiConditionScorer(
+...     adata,
+...     bifurcation_cluster='17',
+...     terminal_cell_types=['homeostatic', 'activated'],
+...     condition_key='treatment',
+...     cluster_key='leiden',
+... )
+>>> mscorer.build_embedding(differentiation_metric='pseudotime')
+>>> mscorer.rebuild_embedding_with_subset_pseudotime(scale_01=False)
+>>> mscorer.fit()
+>>> results = mscorer.score_all_conditions()
+>>> delta = mscorer.compute_delta_CS('control', 'treated')
+>>> stats = mscorer.compare_conditions(results)
+>>> shift = mscorer.trajectory_shift(results)
+>>> mscorer.plot_condition_comparison(results)
+>>> mscorer.plot_trajectory_shift(shift)
 
 For k=2 (reproducing manuscript):
 >>> scorer = scCS.CommitmentScorer(
@@ -43,11 +66,14 @@ For k=2 (reproducing manuscript):
 >>> # result.pairwise_nCS[0, 1] should be ~8.066 (manuscript value)
 """
 
-__version__ = "0.3.2.1"
+__version__ = "0.5.0"
 __author__ = "Emil Kriukov"
 
-# Main API
+# Main API — single condition
 from .trajectory import CommitmentScorer
+
+# Main API — multi-condition
+from .multiconditional import MultiConditionScorer
 
 # Fate map
 from .bifurcation import FateMap, build_fate_map
@@ -57,6 +83,8 @@ from .embedding import (
     build_star_embedding,
     project_velocity_star,
     run_velocity_pipeline,
+    recompute_subset_pseudotime,
+    scale_metric_01,
 )
 
 # Core math (for advanced users)
@@ -72,13 +100,15 @@ from .scores import (
     compute_nCS,
     compute_commitment_vector,
     # Entropy
-    compute_population_entropy,      # aggregate velocity-mass entropy
-    compute_mean_cell_entropy,       # mean per-cell k-way entropy
-    compute_per_fate_cell_entropy,   # per-fate binary cell entropy, shape (k,)
-    compute_nn_cell_entropy,         # NN-smoothed per-cell entropy, shape (n_cells,)
-    compute_commitment_entropy,      # backward-compat alias for compute_population_entropy
+    compute_population_entropy,
+    compute_mean_cell_entropy,
+    compute_per_fate_cell_entropy,
+    compute_nn_cell_entropy,
+    compute_commitment_entropy,      # backward-compat alias
     compute_pairwise_cs_matrix,
     compute_cell_scores,
+    # Bootstrap
+    bootstrap_cs,
 )
 
 # Driver genes
@@ -107,8 +137,9 @@ from .plot import (
 )
 
 __all__ = [
-    # Main class
+    # Main classes
     "CommitmentScorer",
+    "MultiConditionScorer",
     # Fate map
     "FateMap",
     "build_fate_map",
@@ -116,6 +147,8 @@ __all__ = [
     "build_star_embedding",
     "project_velocity_star",
     "run_velocity_pipeline",
+    "recompute_subset_pseudotime",
+    "scale_metric_01",
     # Results
     "CommitmentScoreResult",
     # Core math
@@ -132,9 +165,10 @@ __all__ = [
     "compute_mean_cell_entropy",
     "compute_per_fate_cell_entropy",
     "compute_nn_cell_entropy",
-    "compute_commitment_entropy",   # backward-compat alias
+    "compute_commitment_entropy",    # backward-compat alias
     "compute_pairwise_cs_matrix",
     "compute_cell_scores",
+    "bootstrap_cs",
     # Driver genes
     "get_velocity_drivers",
     "get_deg_drivers",

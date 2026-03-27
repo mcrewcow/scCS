@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -562,30 +562,47 @@ def compute_cell_scores(
     vy: np.ndarray,
     fate_centroids: np.ndarray,
     root_centroid: np.ndarray,
+    mag_weight: bool = True,
+    mag_threshold_pct: float = 5.0,
 ) -> np.ndarray:
-    """Per-cell fate affinity: cosine similarity of velocity to fate direction.
+    """Per-cell fate affinity: magnitude-weighted cosine similarity to fate direction.
 
     For each cell i and fate j, computes:
-        score(i, j) = dot(unit_v_i, unit_d_j)
+        raw_score(i, j) = dot(unit_v_i, unit_d_j)
     where unit_d_j is the unit vector from root_centroid to fate_centroid_j.
 
-    Scores are then shifted to [0, 1] via (score + 1) / 2 and row-normalized.
+    Scores are shifted to [0, 1] via (score + 1) / 2, then optionally
+    weighted by the cell's velocity magnitude (normalized to [0, 1]).
+    Cells with velocity magnitude below ``mag_threshold_pct`` percentile
+    are down-weighted toward the uniform distribution (1/k), reducing noise
+    from near-zero-velocity cells (typically progenitors at the origin).
 
     Parameters
     ----------
     vx, vy : np.ndarray, shape (n_cells,)
     fate_centroids : np.ndarray, shape (k, 2)
     root_centroid : np.ndarray, shape (2,)
+    mag_weight : bool
+        If True (default), weight each cell's score by its normalized velocity
+        magnitude.  Low-magnitude cells are pulled toward the uniform
+        distribution (1/k), reducing noise from near-stationary cells.
+        If False, all cells contribute equally (original behavior).
+    mag_threshold_pct : float
+        Percentile of velocity magnitudes below which cells are considered
+        near-stationary and receive zero weight (replaced by 1/k).
+        Default: 5th percentile.  Only used when mag_weight=True.
 
     Returns
     -------
     cell_scores : np.ndarray, shape (n_cells, k)
         Per-cell affinity for each fate, row-normalized to sum to 1.
+        Low-magnitude cells have scores close to 1/k (uniform).
     """
     vx = np.asarray(vx, dtype=float)
     vy = np.asarray(vy, dtype=float)
     fate_centroids = np.asarray(fate_centroids, dtype=float)
     root_centroid = np.asarray(root_centroid, dtype=float)
+    k = len(fate_centroids)
 
     mag = compute_magnitudes(vx, vy)
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -598,15 +615,114 @@ def compute_cell_scores(
         unit_dirs = np.where(delta_mag > 0, deltas / delta_mag, 0.0)  # (k, 2)
 
     V = np.stack([uvx, uvy], axis=1)  # (n_cells, 2)
-    scores = V @ unit_dirs.T          # (n_cells, k)
+    scores = V @ unit_dirs.T          # (n_cells, k), cosine similarities in [-1, 1]
 
+    # Shift to [0, 1]
     scores = (scores + 1.0) / 2.0
 
+    if mag_weight:
+        # Normalize magnitudes to [0, 1] for weighting
+        mag_threshold = np.percentile(mag[mag > 0], mag_threshold_pct) if (mag > 0).any() else 0.0
+        mag_clipped = np.where(mag >= mag_threshold, mag, 0.0)
+        mag_max = mag_clipped.max()
+        if mag_max > 0:
+            w = mag_clipped / mag_max  # (n_cells,) in [0, 1]
+        else:
+            w = np.ones(len(mag))
+        # Blend: w * directional_score + (1-w) * uniform
+        uniform = np.full((len(vx), k), 1.0 / k)
+        scores = w[:, None] * scores + (1.0 - w[:, None]) * uniform
+
+    # Row-normalize to sum to 1
     row_sums = scores.sum(axis=1, keepdims=True)
     with np.errstate(invalid="ignore", divide="ignore"):
-        scores = np.where(row_sums > 0, scores / row_sums, 1.0 / scores.shape[1])
+        scores = np.where(row_sums > 0, scores / row_sums, 1.0 / k)
 
     return scores
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap confidence intervals for CS values
+# ---------------------------------------------------------------------------
+
+def bootstrap_cs(
+    vx: np.ndarray,
+    vy: np.ndarray,
+    sectors: List[List[int]],
+    n_cells_per_fate: np.ndarray,
+    n_bins: int = 36,
+    n_bootstrap: int = 500,
+    ci: float = 0.95,
+    seed: int = 42,
+    normalized: bool = True,
+) -> Dict:
+    """Bootstrap confidence intervals for pairwise commitment scores.
+
+    Resamples cells with replacement ``n_bootstrap`` times, recomputes
+    unCS and nCS for each bootstrap replicate, and returns the empirical
+    CI bounds.
+
+    Parameters
+    ----------
+    vx, vy : np.ndarray, shape (n_cells,)
+        Velocity components in scCS space.
+    sectors : list of k lists of bin indices
+        Sector definition from centroid_sectors() or equal_sectors().
+    n_cells_per_fate : np.ndarray, shape (k,)
+        Number of cells per fate arm (used for nCS normalization).
+    n_bins : int
+        Number of angular bins.
+    n_bootstrap : int
+        Number of bootstrap replicates.  Default 500.
+    ci : float
+        Confidence interval level.  Default 0.95 (95% CI).
+    seed : int
+    normalized : bool
+        If True, return CI for nCS; if False, for unCS.
+
+    Returns
+    -------
+    dict with keys:
+        'mean'   : np.ndarray (k, k) — mean CS across replicates
+        'ci_low' : np.ndarray (k, k) — lower CI bound
+        'ci_high': np.ndarray (k, k) — upper CI bound
+        'std'    : np.ndarray (k, k) — standard deviation across replicates
+        'n_bootstrap': int
+        'ci_level': float
+    """
+    rng = np.random.default_rng(seed)
+    n_cells = len(vx)
+    k = len(sectors)
+    alpha = (1.0 - ci) / 2.0
+
+    boot_matrices = np.zeros((n_bootstrap, k, k), dtype=float)
+
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n_cells, size=n_cells)
+        vx_b, vy_b = vx[idx], vy[idx]
+
+        mag_b = compute_magnitudes(vx_b, vy_b)
+        ang_b = compute_angles(vx_b, vy_b)
+        _, M_bin_b = bin_angles(ang_b, mag_b, n_bins=n_bins)
+        M_sector_b = compute_sector_magnitudes(M_bin_b, sectors)
+
+        boot_matrices[b] = compute_pairwise_cs_matrix(
+            M_sector_b,
+            n_cells_per_fate=n_cells_per_fate if normalized else None,
+            normalized=normalized,
+        )
+
+    # Replace inf with nan for statistics
+    boot_matrices = np.where(np.isinf(boot_matrices), np.nan, boot_matrices)
+
+    return {
+        "mean":        np.nanmean(boot_matrices, axis=0),
+        "ci_low":      np.nanpercentile(boot_matrices, alpha * 100, axis=0),
+        "ci_high":     np.nanpercentile(boot_matrices, (1 - alpha) * 100, axis=0),
+        "std":         np.nanstd(boot_matrices, axis=0),
+        "n_bootstrap": n_bootstrap,
+        "ci_level":    ci,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +787,7 @@ class CommitmentScoreResult:
     cell_obs_names: Optional[np.ndarray] = None
     nn_cell_entropy: Optional[np.ndarray] = None   # shape (n_cells,), set when k_nn>0
     nn_k: Optional[int] = None                     # k_nn used to compute nn_cell_entropy
+    bootstrap_ci: Optional[Dict[str, Any]] = None  # output of bootstrap_cs(), set when n_bootstrap>0
 
     # ------------------------------------------------------------------
     # Backward-compatibility alias
@@ -749,4 +866,13 @@ class CommitmentScoreResult:
         lines += ["", "  Pairwise nCS matrix:"]
         df = self.pairwise_to_dataframe(normalized=True)
         lines.append(df.to_string())
+        if self.bootstrap_ci is not None:
+            ci_lvl = int(self.bootstrap_ci.get("ci_level", 0.95) * 100)
+            n_boot = self.bootstrap_ci.get("n_bootstrap", "?")
+            lines += [
+                "",
+                f"  Bootstrap {ci_lvl}% CI on nCS (n={n_boot}):",
+                f"    CI low:\n{pd.DataFrame(self.bootstrap_ci['ci_low'], index=self.fate_names, columns=self.fate_names).round(3).to_string()}",
+                f"    CI high:\n{pd.DataFrame(self.bootstrap_ci['ci_high'], index=self.fate_names, columns=self.fate_names).round(3).to_string()}",
+            ]
         return "\n".join(lines)

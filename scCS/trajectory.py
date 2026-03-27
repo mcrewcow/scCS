@@ -52,10 +52,13 @@ from .embedding import (
     build_star_embedding,
     project_velocity_star,
     run_velocity_pipeline,
+    recompute_subset_pseudotime,
+    scale_metric_01,
 )
 from .scores import (
     CommitmentScoreResult,
     bin_angles,
+    bootstrap_cs,
     centroid_sectors,
     compute_cell_scores,
     compute_commitment_entropy,       # backward-compat alias
@@ -208,6 +211,7 @@ class CommitmentScorer:
         self,
         differentiation_metric: Union[str, np.ndarray] = "pseudotime",
         invert_metric: bool = False,
+        scale_metric: bool = False,
         arm_scale: float = 10.0,
         jitter: float = 0.3,
         seed: int = 42,
@@ -231,6 +235,13 @@ class CommitmentScorer:
         invert_metric : bool
             Set True if your metric is inverted (high = less differentiated).
             Note: CytoTRACE2 inversion is handled automatically.
+        scale_metric : bool
+            If True, min-max scale the metric to [0, 1] before embedding.
+            Useful when the metric has a compressed range within the subset
+            (e.g., full-adata pseudotime).  For pseudotime, prefer calling
+            ``rebuild_embedding_with_subset_pseudotime()`` instead, which
+            recomputes pseudotime on the subset subgraph before scaling.
+            Default: False.
         arm_scale : float
             Maximum radial distance (arm length).
         jitter : float
@@ -250,12 +261,18 @@ class CommitmentScorer:
                 f"metric='{differentiation_metric}'"
             )
 
+        metric = differentiation_metric
+        if scale_metric and isinstance(metric, np.ndarray):
+            metric = scale_metric_01(metric)
+            if verbose:
+                print("[scCS] Metric scaled to [0, 1].")
+
         self.adata_sub = build_star_embedding(
             self.adata,
             bifurcation_cluster=self.bifurcation_cluster,
             terminal_cell_types=self.terminal_cell_types,
             cluster_key=self.cluster_key,
-            differentiation_metric=differentiation_metric,
+            differentiation_metric=metric,
             invert_metric=invert_metric,
             arm_scale=arm_scale,
             jitter=jitter,
@@ -369,13 +386,17 @@ class CommitmentScorer:
         cell_mask: Optional[np.ndarray] = None,
         compute_cell_level: bool = True,
         k_nn: Optional[int] = None,
+        n_bootstrap: int = 0,
+        bootstrap_ci: float = 0.95,
+        bootstrap_seed: int = 42,
         verbose: bool = True,
     ) -> CommitmentScoreResult:
         """Compute commitment scores for the full population or a subset.
 
         Parameters
         ----------
-        cell_mask : np.ndarray of bool, shape (n_cells,), optional
+        cell_mask : np.ndarray of bool, shape (n_sub_cells,), optional
+            Boolean mask over ``adata_sub`` cells (NOT the full adata).
             If provided, only cells where mask=True contribute to the
             population-level score (M_bin, M_sector, unCS, nCS).
             Per-cell scores are still computed for all cells.
@@ -390,6 +411,13 @@ class CommitmentScorer:
             Result stored in ``result.nn_cell_entropy`` and
             ``adata_sub.obs['cs_nn_entropy']``.
             Use ``scorer.plot_nn_entropy_elbow()`` to choose a good value.
+        n_bootstrap : int
+            Number of bootstrap replicates for CS confidence intervals.
+            0 (default) disables bootstrapping.  Recommended: 500.
+        bootstrap_ci : float
+            Confidence interval level for bootstrap.  Default 0.95 (95% CI).
+        bootstrap_seed : int
+            Random seed for bootstrap resampling.
         verbose : bool
 
         Returns
@@ -489,6 +517,22 @@ class CommitmentScorer:
                 nn_ent = compute_nn_cell_entropy(cell_scores, coords, k_nn)
                 self.adata_sub.obs["cs_nn_entropy"] = nn_ent
 
+        # 9. Bootstrap CI (optional)
+        boot_ci = None
+        if n_bootstrap > 0:
+            if verbose:
+                print(f"[scCS] Computing bootstrap CI (n={n_bootstrap})...")
+            boot_ci = bootstrap_cs(
+                vx_pop, vy_pop,
+                sectors=sectors,
+                n_cells_per_fate=n_cells_per_fate,
+                n_bins=self.n_bins,
+                n_bootstrap=n_bootstrap,
+                ci=bootstrap_ci,
+                seed=bootstrap_seed,
+                normalized=True,
+            )
+
         result = CommitmentScoreResult(
             fate_names=fate_map.fate_names,
             M_bin=M_bin,
@@ -507,6 +551,7 @@ class CommitmentScorer:
             cell_obs_names=np.array(self.adata_sub.obs_names),
             nn_cell_entropy=nn_ent,
             nn_k=k_nn,
+            bootstrap_ci=boot_ci,
         )
 
         if verbose:
@@ -518,6 +563,7 @@ class CommitmentScorer:
         self,
         subset_key: str,
         compute_cell_level: bool = False,
+        n_bootstrap: int = 0,
         verbose: bool = False,
     ) -> dict:
         """Compute commitment scores separately for each value of subset_key.
@@ -525,11 +571,17 @@ class CommitmentScorer:
         Useful for comparing commitment across conditions, time points,
         or trajectory directions.
 
+        .. note::
+            The ``cell_mask`` is applied to ``adata_sub`` (the embedding subset),
+            not the full adata.  Only cells present in the embedding are scored.
+
         Parameters
         ----------
         subset_key : str
-            Column in adata.obs to split by.
+            Column in adata_sub.obs to split by.
         compute_cell_level : bool
+        n_bootstrap : int
+            Bootstrap replicates for CI.  0 = disabled.
         verbose : bool
 
         Returns
@@ -538,17 +590,19 @@ class CommitmentScorer:
         """
         self._check_fitted()
         results = {}
-        for val in self.adata.obs[subset_key].unique():
-            mask = (self.adata.obs[subset_key] == val).values
+        # Use adata_sub.obs (not self.adata.obs) — mask must align with _vx/_vy
+        for val in self.adata_sub.obs[subset_key].unique():
+            mask = (self.adata_sub.obs[subset_key] == val).values
             if mask.sum() < 10:
                 warnings.warn(
-                    f"Subset '{val}' has only {mask.sum()} cells. Skipping.",
+                    f"Subset '{val}' has only {mask.sum()} cells in adata_sub. Skipping.",
                     stacklevel=2,
                 )
                 continue
             results[val] = self.score(
                 cell_mask=mask,
                 compute_cell_level=compute_cell_level,
+                n_bootstrap=n_bootstrap,
                 verbose=verbose,
             )
             if verbose:
@@ -576,6 +630,148 @@ class CommitmentScorer:
         return None
 
     # ------------------------------------------------------------------
+    # Subset pseudotime recomputation
+    # ------------------------------------------------------------------
+
+    def recompute_subset_pseudotime(
+        self,
+        scale_01: bool = True,
+        verbose: bool = True,
+    ) -> np.ndarray:
+        """Recompute velocity pseudotime on the subset's induced subgraph.
+
+        When ``build_embedding(differentiation_metric='pseudotime')`` is used,
+        pseudotime is resolved on the full adata before subsetting.  This can
+        compress the pseudotime range within the subset, leaving cells poorly
+        distributed along the arms (e.g., all clustered near the origin).
+
+        This method extracts the velocity_graph submatrix for the subset cells,
+        recomputes pseudotime locally, and optionally scales it to [0, 1].
+        The result is stored in ``adata_sub.obs['velocity_pseudotime_sub']``.
+
+        After calling this, rebuild the embedding with the corrected pseudotime::
+
+            scorer.build_embedding(differentiation_metric='pseudotime')
+            scorer.recompute_subset_pseudotime(scale_01=True)
+            scorer.rebuild_embedding_with_subset_pseudotime()
+            scorer.fit()
+
+        Parameters
+        ----------
+        scale_01 : bool
+            If True (default), min-max scale the recomputed pseudotime to [0, 1]
+            within the subset.  Recommended: ensures cells span the full arm
+            length regardless of where the subset sits in the global range.
+            If False, raw pseudotime values are kept (useful for cross-condition
+            comparisons where absolute pseudotime ordering matters).
+        verbose : bool
+
+        Returns
+        -------
+        pt_sub : np.ndarray, shape (n_sub_cells,)
+            Subset-local pseudotime, also stored in
+            ``adata_sub.obs['velocity_pseudotime_sub']``.
+        """
+        self._check_embedding()
+        return recompute_subset_pseudotime(
+            self.adata_sub,
+            adata_full=self.adata,
+            scale_01=scale_01,
+            verbose=verbose,
+        )
+
+    def rebuild_embedding_with_subset_pseudotime(
+        self,
+        scale_01: bool = True,
+        arm_scale: float = 10.0,
+        jitter: float = 0.3,
+        seed: int = 42,
+        verbose: bool = True,
+    ) -> "CommitmentScorer":
+        """Rebuild the star embedding using subset-local pseudotime.
+
+        Convenience wrapper that:
+        1. Recomputes pseudotime on the subset's induced velocity subgraph.
+        2. Optionally scales it to [0, 1] (recommended).
+        3. Rebuilds the star embedding using the corrected pseudotime.
+
+        This corrects the arm-coverage problem that arises when the full-adata
+        pseudotime is compressed within the subset (cells cluster near the
+        origin instead of spanning the arm).
+
+        Parameters
+        ----------
+        scale_01 : bool
+            Scale subset pseudotime to [0, 1] before rebuilding.  Default True.
+        arm_scale : float
+            Maximum radial distance (arm length).
+        jitter : float
+            Perpendicular noise to avoid overplotting.
+        seed : int
+        verbose : bool
+
+        Returns
+        -------
+        self
+        """
+        self._check_embedding()
+
+        # Step 1: recompute pseudotime on the subset subgraph
+        pt_sub = recompute_subset_pseudotime(
+            self.adata_sub,
+            adata_full=self.adata,
+            scale_01=scale_01,
+            verbose=verbose,
+        )
+
+        # Step 2: map subset pseudotime back to full-adata indices so that
+        # build_star_embedding can slice it correctly via keep_mask
+        parent_idx = self.adata_sub.uns.get("sccs", {}).get("parent_indices", None)
+        pt_full = np.full(self.adata.n_obs, np.nan)
+        if parent_idx is not None:
+            pt_full[parent_idx] = pt_sub
+        else:
+            sub_names = list(self.adata_sub.obs_names)
+            full_names = list(self.adata.obs_names)
+            name_to_full = {n: i for i, n in enumerate(full_names)}
+            for sub_i, name in enumerate(sub_names):
+                if name in name_to_full:
+                    pt_full[name_to_full[name]] = pt_sub[sub_i]
+
+        # Fill non-subset cells with median (they will be excluded by keep_mask anyway)
+        nan_mask = np.isnan(pt_full)
+        if nan_mask.any():
+            pt_full[nan_mask] = np.nanmedian(pt_full)
+
+        # Step 3: rebuild embedding with the corrected metric
+        if verbose:
+            print("[scCS] Rebuilding star embedding with subset-local pseudotime...")
+
+        self.adata_sub = build_star_embedding(
+            self.adata,
+            bifurcation_cluster=self.bifurcation_cluster,
+            terminal_cell_types=self.terminal_cell_types,
+            cluster_key=self.cluster_key,
+            differentiation_metric=pt_full,   # pass as pre-resolved array
+            invert_metric=False,               # already oriented correctly
+            arm_scale=arm_scale,
+            jitter=jitter,
+            seed=seed,
+        )
+        self._embedding_built = True
+        self._fitted = False   # must re-fit after rebuilding
+        self._vx = None
+        self._vy = None
+
+        if verbose:
+            print(
+                "[scCS] Embedding rebuilt. Call fit() again to update the FateMap "
+                "and velocity projection."
+            )
+
+        return self
+
+    # ------------------------------------------------------------------
     # Internal checks
     # ------------------------------------------------------------------
 
@@ -595,6 +791,102 @@ class CommitmentScorer:
                 "Velocity vectors not loaded. Call project_velocity() or "
                 "load_velocity_vectors() after build_embedding()."
             )
+
+    # ------------------------------------------------------------------
+    # Label transfer to full adata
+    # ------------------------------------------------------------------
+
+    def transfer_labels(
+        self,
+        adata,
+        result: CommitmentScoreResult,
+        prefix: str = "cs_",
+    ) -> None:
+        """Write per-cell commitment scores back to the full adata.
+
+        After scoring, per-cell fate affinities, dominant fate, and entropy
+        are stored in ``adata_sub.obs``.  This method transfers those columns
+        to the full adata so they can be used in downstream analyses (e.g.,
+        UMAP coloring, integration with other tools).
+
+        Cells not in the embedding subset receive NaN for numeric columns
+        and 'unassigned' for categorical columns.
+
+        Parameters
+        ----------
+        adata : AnnData
+            The full dataset (same object passed to CommitmentScorer.__init__).
+        result : CommitmentScoreResult
+            Output of scorer.score(compute_cell_level=True).
+        prefix : str
+            Column prefix.  Default: 'cs_'.
+
+        Columns written to adata.obs
+        ----------------------------
+        ``{prefix}{fate_name}``     : per-cell fate affinity (float, NaN outside subset)
+        ``{prefix}dominant_fate``   : dominant fate label (str, 'unassigned' outside subset)
+        ``{prefix}entropy``         : per-cell commitment entropy (float, NaN outside subset)
+        ``{prefix}nn_entropy``      : NN-smoothed entropy if computed (float, NaN outside subset)
+        ``{prefix}pseudotime_sub``  : subset-local pseudotime if computed (float, NaN outside subset)
+        """
+        self._check_fitted()
+        if result.cell_scores is None:
+            raise ValueError(
+                "result.cell_scores is None. "
+                "Run scorer.score(compute_cell_level=True) first."
+            )
+
+        n_full = adata.n_obs
+        full_names = list(adata.obs_names)
+        name_to_full_idx = {n: i for i, n in enumerate(full_names)}
+
+        sub_names = list(self.adata_sub.obs_names)
+        sub_to_full = np.array([
+            name_to_full_idx.get(n, -1) for n in sub_names
+        ])
+        valid = sub_to_full >= 0
+
+        # Per-fate affinity
+        for j, fate_name in enumerate(result.fate_names):
+            col = f"{prefix}{fate_name}"
+            arr = np.full(n_full, np.nan)
+            arr[sub_to_full[valid]] = result.cell_scores[valid, j]
+            adata.obs[col] = arr
+
+        # Dominant fate
+        dom_col = f"{prefix}dominant_fate"
+        dom_arr = np.full(n_full, "unassigned", dtype=object)
+        sub_dom = self.adata_sub.obs.get("cs_dominant_fate", None)
+        if sub_dom is not None:
+            dom_arr[sub_to_full[valid]] = sub_dom.values[valid]
+        adata.obs[dom_col] = dom_arr
+
+        # Per-cell entropy
+        ent_col = f"{prefix}entropy"
+        ent_arr = np.full(n_full, np.nan)
+        sub_ent = self.adata_sub.obs.get("cs_entropy", None)
+        if sub_ent is not None:
+            ent_arr[sub_to_full[valid]] = sub_ent.values[valid]
+        adata.obs[ent_col] = ent_arr
+
+        # NN-smoothed entropy
+        if result.nn_cell_entropy is not None:
+            nn_col = f"{prefix}nn_entropy"
+            nn_arr = np.full(n_full, np.nan)
+            nn_arr[sub_to_full[valid]] = result.nn_cell_entropy[valid]
+            adata.obs[nn_col] = nn_arr
+
+        # Subset-local pseudotime
+        if "velocity_pseudotime_sub" in self.adata_sub.obs:
+            pt_col = f"{prefix}pseudotime_sub"
+            pt_arr = np.full(n_full, np.nan)
+            pt_arr[sub_to_full[valid]] = self.adata_sub.obs["velocity_pseudotime_sub"].values[valid]
+            adata.obs[pt_col] = pt_arr
+
+        print(
+            f"[scCS] Labels transferred to adata.obs for {valid.sum()} / {n_full} cells. "
+            f"Columns: {[f'{prefix}{f}' for f in result.fate_names] + [dom_col, ent_col]}"
+        )
 
     # ------------------------------------------------------------------
     # Plotting shortcuts

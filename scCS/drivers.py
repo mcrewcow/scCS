@@ -76,6 +76,15 @@ def get_velocity_drivers(
     obs_labels = adata_sub.obs[cluster_key].astype(str).values
     results: Dict[str, pd.DataFrame] = {}
 
+    # Compute progenitor mean velocity once (used as baseline for delta)
+    bif_mask = obs_labels == str(bifurcation_cluster)
+    if bif_mask.sum() > 0:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            mean_vel_progenitor = np.nanmean(V_genes[bif_mask, :], axis=0)
+    else:
+        mean_vel_progenitor = np.zeros(V_genes.shape[1])
+
     for name in fate_names:
         mask = obs_labels == str(name)
         if mask.sum() == 0:
@@ -89,20 +98,28 @@ def get_velocity_drivers(
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            mean_vel = np.nanmean(V_fate, axis=0)
+            mean_vel_fate = np.nanmean(V_fate, axis=0)
+
+        # Delta velocity: fate mean minus progenitor mean.
+        # This removes genes that are constitutively active in the progenitor,
+        # highlighting genes specifically upregulated along this fate arm.
+        delta_vel = mean_vel_fate - mean_vel_progenitor
 
         df = pd.DataFrame({
             "gene": genes,
-            "mean_velocity": mean_vel,
+            "mean_velocity": mean_vel_fate,
+            "progenitor_velocity": mean_vel_progenitor,
+            "delta_velocity": delta_vel,
         }).dropna(subset=["mean_velocity"])
 
-        df = df.sort_values("mean_velocity", ascending=False).reset_index(drop=True)
+        # Sort by delta_velocity (fate-specific upregulation)
+        df = df.sort_values("delta_velocity", ascending=False).reset_index(drop=True)
         df["rank"] = df.index + 1
         results[name] = df
 
-        print(f"\n── Velocity drivers: {name} (top {n_top}) ──")
+        print(f"\n── Velocity drivers: {name} (top {n_top}, sorted by delta_velocity) ──")
         print(
-            df.head(n_top)[["rank", "gene", "mean_velocity"]]
+            df.head(n_top)[["rank", "gene", "delta_velocity", "mean_velocity"]]
             .to_string(index=False)
         )
 

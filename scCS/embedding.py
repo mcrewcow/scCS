@@ -503,6 +503,9 @@ def _resolve_metric(
                     scores = 1.0 - scores
                 return _fill_nan(scores)
         scores = np.array(adata.obs["velocity_pseudotime"], dtype=float)
+        # NOTE: This pseudotime was computed on the full adata.  After subsetting,
+        # the caller should invoke recompute_subset_pseudotime() to get a
+        # subset-local pseudotime with better arm coverage.
 
     elif metric == "cytotrace":
         # CytoTRACE2: look for common column names
@@ -619,3 +622,195 @@ def _graph_velocity_projection(
     V = expected_coords - coords       # displacement = velocity
 
     return V[:, 0], V[:, 1]
+
+
+# ---------------------------------------------------------------------------
+# Subset-local pseudotime recomputation
+# ---------------------------------------------------------------------------
+
+def recompute_subset_pseudotime(
+    adata_sub,
+    adata_full,
+    scale_01: bool = True,
+    verbose: bool = True,
+) -> np.ndarray:
+    """Recompute velocity pseudotime on the subset's induced subgraph.
+
+    When ``build_star_embedding`` uses ``differentiation_metric='pseudotime'``,
+    the pseudotime is resolved on the full adata before subsetting.  This means
+    the pseudotime range within the bifurcation+fate subset is compressed and
+    non-uniform: cells that span the full differentiation axis in the subset
+    may all cluster near 0 or 1 on the arm, leaving large empty stretches.
+
+    This function extracts the velocity_graph submatrix for the subset cells,
+    recomputes pseudotime locally, and optionally scales it to [0, 1].  The
+    result is stored in ``adata_sub.obs['velocity_pseudotime_sub']`` and
+    returned as an array.
+
+    Call this after ``build_embedding()`` and before (or instead of) using
+    the full-adata pseudotime for arm ordering.  To rebuild the embedding with
+    the corrected pseudotime, pass the returned array as a custom metric::
+
+        scorer.build_embedding(differentiation_metric='pseudotime')
+        pt_sub = recompute_subset_pseudotime(scorer.adata_sub, adata)
+        scorer.build_embedding(differentiation_metric=pt_sub_full)
+        # where pt_sub_full is the subset scores mapped back to full adata indices
+
+    Alternatively, use the convenience method
+    ``CommitmentScorer.rebuild_embedding_with_subset_pseudotime()``.
+
+    Parameters
+    ----------
+    adata_sub : AnnData
+        Subset returned by ``build_star_embedding()``.  Must have
+        ``uns['sccs']['parent_indices']`` set (done automatically).
+    adata_full : AnnData
+        Full dataset with intact ``uns['velocity_graph']``.
+    scale_01 : bool
+        If True (default), min-max scale the recomputed pseudotime to [0, 1]
+        within the subset.  This ensures cells span the full arm length
+        regardless of where the subset sits in the global pseudotime range.
+        If False, the raw pseudotime values are returned (useful when you
+        want to compare absolute pseudotime across conditions).
+    verbose : bool
+
+    Returns
+    -------
+    pt_sub : np.ndarray, shape (n_sub_cells,)
+        Subset-local pseudotime, stored in
+        ``adata_sub.obs['velocity_pseudotime_sub']``.
+    """
+    if not _SCVELO_AVAILABLE:
+        raise ImportError(
+            "scvelo is required for pseudotime recomputation. pip install scvelo"
+        )
+    if "velocity_graph" not in adata_full.uns:
+        raise ValueError(
+            "velocity_graph not found in adata_full.uns. "
+            "Run scvelo.tl.velocity_graph() first."
+        )
+
+    import scipy.sparse as sp
+
+    parent_idx = adata_sub.uns.get("sccs", {}).get("parent_indices", None)
+    if parent_idx is None:
+        # Fall back to obs_names matching
+        sub_names = set(adata_sub.obs_names)
+        full_names = list(adata_full.obs_names)
+        parent_idx = np.array([i for i, n in enumerate(full_names) if n in sub_names])
+
+    if verbose:
+        print(
+            f"[scCS] Recomputing pseudotime on subset "
+            f"({len(parent_idx)} / {adata_full.n_obs} cells)..."
+        )
+
+    # Extract the sub × sub block of the velocity graph
+    T_full = adata_full.uns["velocity_graph"]
+    if not sp.issparse(T_full):
+        T_full = sp.csr_matrix(T_full)
+    T_sub = T_full[parent_idx, :][:, parent_idx]  # (n_sub, n_sub)
+
+    # Inject the subgraph into a temporary copy of adata_sub for scVelo
+    adata_tmp = adata_sub.copy()
+    adata_tmp.uns["velocity_graph"] = T_sub
+
+    # scVelo's velocity_pseudotime uses the graph to compute a diffusion-based
+    # ordering.  We need neighbors connectivities too; use the subset block.
+    if "connectivities" in adata_full.obsp:
+        C_full = adata_full.obsp["connectivities"]
+        if not sp.issparse(C_full):
+            C_full = sp.csr_matrix(C_full)
+        C_sub = C_full[parent_idx, :][:, parent_idx]
+        adata_tmp.obsp["connectivities"] = C_sub
+        adata_tmp.obsp["distances"] = C_sub  # placeholder; scVelo only needs connectivities
+
+    try:
+        scv.tl.velocity_pseudotime(adata_tmp)
+        pt_sub = np.array(adata_tmp.obs["velocity_pseudotime"], dtype=float)
+    except Exception as e:
+        warnings.warn(
+            f"scvelo.tl.velocity_pseudotime on subset failed ({e}). "
+            "Falling back to diffusion pseudotime via scanpy.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        pt_sub = _fallback_dpt(adata_tmp, verbose=verbose)
+
+    pt_sub = _fill_nan(pt_sub)
+
+    if scale_01:
+        pt_min, pt_max = pt_sub.min(), pt_sub.max()
+        if pt_max > pt_min:
+            pt_sub = (pt_sub - pt_min) / (pt_max - pt_min)
+        else:
+            pt_sub = np.zeros_like(pt_sub)
+        if verbose:
+            print("[scCS] Subset pseudotime scaled to [0, 1].")
+
+    adata_sub.obs["velocity_pseudotime_sub"] = pt_sub
+
+    if verbose:
+        print(
+            f"[scCS] Subset pseudotime stored in "
+            f"adata_sub.obs['velocity_pseudotime_sub']. "
+            f"Range: [{pt_sub.min():.3f}, {pt_sub.max():.3f}]"
+        )
+
+    return pt_sub
+
+
+def scale_metric_01(scores: np.ndarray) -> np.ndarray:
+    """Min-max scale a per-cell metric to [0, 1].
+
+    Useful for normalizing any differentiation metric (pseudotime, CytoTRACE2,
+    pathway score, etc.) before passing it to ``build_star_embedding`` so that
+    cells span the full arm length uniformly.
+
+    Parameters
+    ----------
+    scores : np.ndarray, shape (n_cells,)
+        Per-cell metric values.  NaN values are preserved.
+
+    Returns
+    -------
+    scaled : np.ndarray, shape (n_cells,)
+        Values in [0, 1].  Returns zeros if all values are identical.
+    """
+    scores = np.asarray(scores, dtype=float)
+    s_min = np.nanmin(scores)
+    s_max = np.nanmax(scores)
+    if s_max <= s_min:
+        return np.zeros_like(scores)
+    return (scores - s_min) / (s_max - s_min)
+
+
+def _fallback_dpt(adata_tmp, verbose: bool = True) -> np.ndarray:
+    """Fallback: diffusion pseudotime via scanpy when scVelo fails."""
+    if not _SCANPY_AVAILABLE:
+        warnings.warn(
+            "scanpy not available for DPT fallback. Returning uniform pseudotime.",
+            RuntimeWarning, stacklevel=2,
+        )
+        return np.linspace(0, 1, adata_tmp.n_obs)
+    try:
+        import scanpy as sc
+        if "connectivities" not in adata_tmp.obsp:
+            sc.pp.neighbors(adata_tmp, n_neighbors=15, use_rep="X_sccs")
+        # Use the cell with lowest scCS radial distance as root
+        coords = np.array(adata_tmp.obsm["X_sccs"])
+        radii = np.linalg.norm(coords, axis=1)
+        root_idx = int(np.argmin(radii))
+        adata_tmp.uns["iroot"] = root_idx
+        sc.tl.dpt(adata_tmp)
+        pt = np.array(adata_tmp.obs["dpt_pseudotime"], dtype=float)
+        if verbose:
+            print("[scCS] Used scanpy DPT as pseudotime fallback.")
+        return pt
+    except Exception as e2:
+        warnings.warn(
+            f"DPT fallback also failed ({e2}). Returning radial distance as pseudotime.",
+            RuntimeWarning, stacklevel=2,
+        )
+        coords = np.array(adata_tmp.obsm["X_sccs"])
+        return np.linalg.norm(coords, axis=1)

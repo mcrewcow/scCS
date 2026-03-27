@@ -7,7 +7,8 @@ scCS — Single-Cell Commitment Scores
 
    introduction
    requirements
-   scCS_tutorial
+   scCS_tutorial_single_condition
+   scCS_tutorial_pairwise_comparison
    api
    changelog
 

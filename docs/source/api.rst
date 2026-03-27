@@ -8,10 +8,22 @@ in the sidebar.
 CommitmentScorer
 ----------------
 
-The main entry point. Wraps an AnnData object and exposes all scoring
-and plotting methods.
+The main entry point for single-condition analysis. Wraps an AnnData object
+and exposes all scoring and plotting methods.
 
 .. autoclass:: scCS.CommitmentScorer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+MultiConditionScorer
+--------------------
+
+Multi-condition extension. Builds a shared star embedding on pooled data,
+then scores each condition separately. Provides statistical comparison,
+mixed-effects modeling, and trajectory shift analysis.
+
+.. autoclass:: scCS.MultiConditionScorer
    :members:
    :undoc-members:
    :show-inheritance:
@@ -58,6 +70,8 @@ Embedding
 ---------
 
 .. autofunction:: scCS.build_star_embedding
+.. autofunction:: scCS.recompute_subset_pseudotime
+.. autofunction:: scCS.scale_metric_01
 
 Fate Detection
 --------------
@@ -86,3 +100,4 @@ Core Math — Scores
 .. autofunction:: scCS.equal_sectors
 .. autofunction:: scCS.centroid_sectors
 .. autofunction:: scCS.compute_sector_magnitudes
+.. autofunction:: scCS.bootstrap_cs

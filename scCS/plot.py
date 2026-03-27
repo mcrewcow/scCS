@@ -360,6 +360,7 @@ def plot_expression_trends(
     result: CommitmentScoreResult,
     genes: List[str],
     fate: Optional[str] = None,
+    x_axis: str = "affinity",
     n_bins: int = 10,
     layer: Optional[str] = None,
     smooth: bool = True,
@@ -369,10 +370,10 @@ def plot_expression_trends(
     ncols: int = 3,
     save_path: Optional[str] = None,
 ) -> plt.Figure:
-    """Plot gene expression as a function of commitment score.
+    """Plot gene expression trends along a chosen commitment axis.
 
-    Cells are binned along the commitment score axis (0 → 1) for a chosen
-    fate, and mean expression per bin is plotted with a LOWESS smooth.
+    Cells are binned along the x-axis and mean expression per bin is plotted
+    with a LOWESS smooth.
 
     Parameters
     ----------
@@ -382,10 +383,19 @@ def plot_expression_trends(
     genes : list of str
         Gene names to plot.  Must be present in ``adata.var_names``.
     fate : str, optional
-        Which fate's commitment score to use as the x-axis.
+        Which fate to use as the reference.
         Defaults to the fate with the highest M_sector.
+    x_axis : str
+        What to use as the x-axis for binning:
+        - ``'affinity'``       : per-cell fate affinity score for ``fate``
+                                 (0 → 1, from compute_cell_scores).
+        - ``'pseudotime'``     : velocity_pseudotime from adata.obs
+                                 (or velocity_pseudotime_sub if available).
+        - ``'radial_distance'``: Euclidean distance from origin in X_sccs
+                                 (arm position, 0 = progenitor, arm_scale = tip).
+        Default: ``'affinity'``.
     n_bins : int
-        Number of bins along the commitment axis.
+        Number of bins along the x-axis.
     layer : str, optional
         AnnData layer to use for expression.  Defaults to ``adata.X``.
     smooth : bool
@@ -421,48 +431,74 @@ def plot_expression_trends(
     colors = _fate_colors(result.fate_names, color_map)
     fate_color = colors[fate]
 
-    # Commitment scores for this fate (per-cell affinity, n_cells_sub)
-    cs_vals = result.cell_scores[:, fate_idx]
-
     # Validate genes
     missing = [g for g in genes if g not in adata.var_names]
     if missing:
         raise ValueError(f"Genes not found in adata.var_names: {missing}")
 
-    # Align adata to the subset used during scoring.
-    # result.cell_scores has n_cells_sub rows; adata may have more cells.
+    # Align adata to the subset used during scoring
     if result.cell_obs_names is not None:
         adata_sub = adata[result.cell_obs_names]
     elif result.cell_scores.shape[0] != adata.n_obs:
         raise ValueError(
             f"result.cell_scores has {result.cell_scores.shape[0]} rows but "
             f"adata has {adata.n_obs} cells, and result.cell_obs_names is not "
-            f"set (old result object). Re-run scorer.score(compute_cell_level=True) "
-            f"to regenerate the result."
+            f"set (old result object). Re-run scorer.score(compute_cell_level=True)."
         )
     else:
         adata_sub = adata
 
+    # --- Resolve x-axis values ---
+    x_axis = x_axis.lower()
+    if x_axis == "affinity":
+        x_vals = result.cell_scores[:, fate_idx]
+        x_label = f"Fate affinity — {fate}"
+    elif x_axis == "pseudotime":
+        # Prefer subset-local pseudotime if available
+        pt_col = (
+            "velocity_pseudotime_sub"
+            if "velocity_pseudotime_sub" in adata_sub.obs
+            else "velocity_pseudotime"
+        )
+        if pt_col not in adata_sub.obs:
+            raise ValueError(
+                f"'{pt_col}' not found in adata.obs. "
+                "Run scorer.recompute_subset_pseudotime() or scvelo.tl.velocity_pseudotime()."
+            )
+        x_vals = np.array(adata_sub.obs[pt_col], dtype=float)
+        x_label = "Pseudotime"
+    elif x_axis in ("radial_distance", "radial"):
+        if "X_sccs" not in adata_sub.obsm:
+            raise ValueError(
+                "X_sccs not found in adata.obsm. Run build_embedding() first."
+            )
+        coords = np.array(adata_sub.obsm["X_sccs"])
+        x_vals = np.linalg.norm(coords, axis=1)
+        x_label = "Radial distance (scCS)"
+    else:
+        raise ValueError(
+            f"Unknown x_axis='{x_axis}'. "
+            "Choose from: 'affinity', 'pseudotime', 'radial_distance'."
+        )
+
     # Extract expression matrix (n_cells_sub × n_genes)
     gene_idx = [adata_sub.var_names.get_loc(g) for g in genes]
-    if layer is not None:
-        X = adata_sub.layers[layer]
-    else:
-        X = adata_sub.X
-
+    X = adata_sub.layers[layer] if layer is not None else adata_sub.X
     if sp.issparse(X):
         expr = np.asarray(X[:, gene_idx].todense())
     else:
         expr = np.asarray(X[:, gene_idx])
 
-    # Bin cells along commitment axis
-    bin_edges = np.linspace(cs_vals.min(), cs_vals.max(), n_bins + 1)
+    # Bin cells along x-axis
+    valid = ~np.isnan(x_vals)
+    x_min, x_max = x_vals[valid].min(), x_vals[valid].max()
+    bin_edges = np.linspace(x_min, x_max, n_bins + 1)
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-    bin_assign = np.digitize(cs_vals, bin_edges[1:-1])  # 0 … n_bins-1
+    bin_assign = np.digitize(x_vals, bin_edges[1:-1])  # 0 … n_bins-1
 
-    mean_expr = np.zeros((n_bins, len(genes)))
+    mean_expr = np.full((n_bins, len(genes)), np.nan)
     for b in range(n_bins):
-        mask = bin_assign == b
+        mask = (bin_assign == b) & valid
         if mask.sum() > 0:
             mean_expr[b] = expr[mask].mean(axis=0)
 
@@ -481,19 +517,32 @@ def plot_expression_trends(
         ax = axes[row][col]
 
         y = mean_expr[:, gi]
-        ax.scatter(bin_centers, y, color=fate_color, s=30, alpha=0.7, zorder=3)
+        valid_bins = ~np.isnan(y)
+        ax.scatter(
+            bin_centers[valid_bins], y[valid_bins],
+            color=fate_color, s=30, alpha=0.7, zorder=3,
+        )
 
-        if smooth and n_bins >= 5:
+        if smooth and valid_bins.sum() >= 5:
             try:
-                sm = lowess(y, bin_centers, frac=smooth_frac, return_sorted=True)
+                sm = lowess(
+                    y[valid_bins], bin_centers[valid_bins],
+                    frac=smooth_frac, return_sorted=True,
+                )
                 ax.plot(sm[:, 0], sm[:, 1], color=fate_color, linewidth=2.0)
             except Exception:
-                ax.plot(bin_centers, y, color=fate_color, linewidth=1.5)
+                ax.plot(
+                    bin_centers[valid_bins], y[valid_bins],
+                    color=fate_color, linewidth=1.5,
+                )
         else:
-            ax.plot(bin_centers, y, color=fate_color, linewidth=1.5)
+            ax.plot(
+                bin_centers[valid_bins], y[valid_bins],
+                color=fate_color, linewidth=1.5,
+            )
 
         ax.set_title(gene, fontsize=10)
-        ax.set_xlabel(f"CS ({fate})", fontsize=8)
+        ax.set_xlabel(x_label, fontsize=8)
         ax.set_ylabel("Mean expression", fontsize=8)
         sns.despine(ax=ax)
 
@@ -503,7 +552,7 @@ def plot_expression_trends(
         axes[row][col].set_visible(False)
 
     plt.suptitle(
-        f"Expression trends along '{fate}' commitment axis",
+        f"Expression trends — '{fate}' arm  (x: {x_axis})",
         fontsize=11, y=1.01,
     )
     plt.tight_layout()
