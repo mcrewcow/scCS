@@ -590,9 +590,18 @@ class CommitmentScorer:
         """
         self._check_fitted()
         results = {}
-        # Use adata_sub.obs (not self.adata.obs) — mask must align with _vx/_vy
-        for val in self.adata_sub.obs[subset_key].unique():
-            mask = (self.adata_sub.obs[subset_key] == val).values
+        # Prefer adata_sub.obs; fall back to adata.obs aligned by obs_names.
+        # Users typically add metadata to the full adata, not adata_sub.
+        if subset_key in self.adata_sub.obs.columns:
+            subset_col = self.adata_sub.obs[subset_key]
+        elif subset_key in self.adata.obs.columns:
+            subset_col = self.adata.obs.loc[self.adata_sub.obs_names, subset_key]
+        else:
+            raise KeyError(
+                f"'{subset_key}' not found in adata_sub.obs or adata.obs columns."
+            )
+        for val in subset_col.unique():
+            mask = (subset_col == val).values
             if mask.sum() < 10:
                 warnings.warn(
                     f"Subset '{val}' has only {mask.sum()} cells in adata_sub. Skipping.",
