@@ -22,12 +22,12 @@ Quick start — single condition
 >>> import scCS
 >>> scorer = scCS.CommitmentScorer(
 ...     adata,
-...     bifurcation_cluster='17',
-...     terminal_cell_types=['FateA', 'FateB', 'FateC'],
-...     cluster_key='leiden',
+...     root='17',
+...     branches=['FateA', 'FateB', 'FateC'],
+...     obs_key='leiden',
 ... )
->>> scorer.build_embedding(differentiation_metric='pseudotime')
->>> scorer.rebuild_embedding_with_subset_pseudotime()   # fix arm coverage
+>>> scorer.build_embedding(ordering_metric='pseudotime')
+>>> scorer.refit_pseudotime()   # fix arm coverage
 >>> scorer.fit()
 >>> result = scorer.score(n_bootstrap=500)
 >>> print(result.summary())
@@ -38,35 +38,35 @@ Quick start — multi-condition
 ------------------------------
 >>> mscorer = scCS.MultiConditionScorer(
 ...     adata,
-...     bifurcation_cluster='17',
-...     terminal_cell_types=['homeostatic', 'activated'],
-...     condition_key='treatment',
-...     cluster_key='leiden',
+...     root='17',
+...     branches=['homeostatic', 'activated'],
+...     condition_obs_key='treatment',
+...     obs_key='leiden',
 ... )
->>> mscorer.build_embedding(differentiation_metric='pseudotime')
->>> mscorer.rebuild_embedding_with_subset_pseudotime(scale_01=False)
+>>> mscorer.build_embedding(ordering_metric='pseudotime')
+>>> mscorer.refit_pseudotime(scale_01=False)
 >>> mscorer.fit()
 >>> results = mscorer.score_all_conditions()
 >>> delta = mscorer.compute_delta_CS('control', 'treated')
 >>> stats = mscorer.compare_conditions(results)
 >>> shift = mscorer.trajectory_shift(results)
->>> mscorer.plot_condition_comparison(results)
+>>> mscorer.plot_affinity_distributions(results)
 >>> mscorer.plot_trajectory_shift(shift)
 
 For k=2 (reproducing manuscript):
 >>> scorer = scCS.CommitmentScorer(
 ...     adata,
-...     bifurcation_cluster='17',
-...     terminal_cell_types=['homeostatic', 'activated'],
-...     cluster_key='leiden',
+...     root='17',
+...     branches=['homeostatic', 'activated'],
+...     obs_key='leiden',
 ... )
->>> scorer.build_embedding(differentiation_metric='pseudotime')
+>>> scorer.build_embedding(ordering_metric='pseudotime')
 >>> scorer.fit()
 >>> result = scorer.score()
 >>> # result.pairwise_nCS[0, 1] should be ~8.066 (manuscript value)
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.2"
 __author__ = "Emil Kriukov"
 
 # Main API — single condition
@@ -115,6 +115,7 @@ from .scores import (
 from .drivers import (
     get_velocity_drivers,
     get_deg_drivers,
+    get_velocity_fate_drivers,
 )
 
 # Pathway enrichment
@@ -128,12 +129,16 @@ from .plot import (
     plot_star_embedding,
     plot_star_panels,
     plot_rose,
+    plot_rose_grid,
     plot_pairwise_cs,
     plot_commitment_bar,
     plot_commitment_heatmap,
     plot_subset_comparison,
     plot_expression_trends,
     plot_nn_entropy_elbow,
+    plot_delta_cs_heatmap,
+    plot_compare_conditions_bar,
+    plot_commitment_vector_radar,
 )
 
 __all__ = [
@@ -172,6 +177,7 @@ __all__ = [
     # Driver genes
     "get_velocity_drivers",
     "get_deg_drivers",
+    "get_velocity_fate_drivers",
     # Pathway enrichment
     "run_enrichment_per_fate",
     "export_enrichment_tables",
@@ -179,10 +185,14 @@ __all__ = [
     "plot_star_embedding",
     "plot_star_panels",
     "plot_rose",
+    "plot_rose_grid",
     "plot_pairwise_cs",
     "plot_commitment_bar",
     "plot_commitment_heatmap",
     "plot_subset_comparison",
     "plot_expression_trends",
     "plot_nn_entropy_elbow",
+    "plot_delta_cs_heatmap",
+    "plot_compare_conditions_bar",
+    "plot_commitment_vector_radar",
 ]

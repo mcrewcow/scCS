@@ -25,7 +25,7 @@ Tier 2 — Statistical comparison
                                       + pairwise Mann-Whitney (k>2) on per-cell
                                       fate affinity scores
     compute_delta_CS()              : ΔCS = nCS_A − nCS_B with bootstrap CI
-    plot_condition_comparison()     : violin/box plots of per-cell affinities
+    plot_affinity_distributions()   : violin/box plots of per-cell affinities
                                       split by condition, one panel per fate
 
 Tier 3 — Advanced
@@ -42,17 +42,17 @@ Usage
 -----
 >>> mscorer = scCS.MultiConditionScorer(
 ...     adata,
-...     bifurcation_cluster='17',
-...     terminal_cell_types=['homeostatic', 'activated'],
-...     condition_key='treatment',
-...     cluster_key='leiden',
+...     root='17',
+...     branches=['homeostatic', 'activated'],
+...     condition_obs_key='treatment',
+...     obs_key='leiden',
 ... )
->>> mscorer.build_embedding(differentiation_metric='pseudotime')
+>>> mscorer.build_embedding(ordering_metric='pseudotime')
 >>> mscorer.fit()
 >>> results = mscorer.score_all_conditions()
 >>> delta = mscorer.compute_delta_CS('control', 'treated')
 >>> stats = mscorer.compare_conditions(results)
->>> mscorer.plot_condition_comparison(results)
+>>> mscorer.plot_affinity_distributions(results)
 >>> shift = mscorer.trajectory_shift(results)
 >>> mscorer.plot_trajectory_shift(shift)
 """
@@ -84,7 +84,7 @@ from .scores import (
     compute_per_fate_cell_entropy,
     compute_nn_cell_entropy,
 )
-from .plot import _fate_colors, PROGENITOR_COLOR
+from .plot import _fate_colors, _condition_colors, CONDITION_PALETTE
 
 
 # ---------------------------------------------------------------------------
@@ -102,17 +102,17 @@ class MultiConditionScorer:
     ----------
     adata : AnnData
         Full single-cell dataset containing all conditions.
-    bifurcation_cluster : str
-        Label of the progenitor/root cluster in adata.obs[cluster_key].
-    terminal_cell_types : list of str
+    root : str
+        Label of the progenitor/root cluster in adata.obs[obs_key].
+    branches : list of str
         Labels of the k terminal fate clusters.
-    condition_key : str
+    condition_obs_key : str
         Column in adata.obs with condition labels (e.g., 'treatment').
-    cluster_key : str
+    obs_key : str
         Column in adata.obs with cluster labels.  Default: 'leiden'.
-    n_bins : int
+    n_angle_bins : int
         Number of angular bins.  Default: 36.
-    sector_mode : {'centroid', 'equal'}
+    sector_method : {'centroid', 'equal'}
         Sector definition strategy.
     copy : bool
         Work on a copy of adata.
@@ -121,12 +121,12 @@ class MultiConditionScorer:
     --------
     >>> mscorer = MultiConditionScorer(
     ...     adata,
-    ...     bifurcation_cluster='17',
-    ...     terminal_cell_types=['homeostatic', 'activated'],
-    ...     condition_key='treatment',
-    ...     cluster_key='leiden',
+    ...     root='17',
+    ...     branches=['homeostatic', 'activated'],
+    ...     condition_obs_key='treatment',
+    ...     obs_key='leiden',
     ... )
-    >>> mscorer.build_embedding(differentiation_metric='pseudotime')
+    >>> mscorer.build_embedding(ordering_metric='pseudotime')
     >>> mscorer.fit()
     >>> results = mscorer.score_all_conditions()
     >>> delta = mscorer.compute_delta_CS('control', 'treated')
@@ -136,32 +136,32 @@ class MultiConditionScorer:
     def __init__(
         self,
         adata,
-        bifurcation_cluster: str,
-        terminal_cell_types: List[str],
-        condition_key: str,
-        cluster_key: str = "leiden",
-        n_bins: int = 36,
-        sector_mode: Literal["centroid", "equal"] = "centroid",
+        root: str,
+        branches: List[str],
+        condition_obs_key: str,
+        obs_key: str = "leiden",
+        n_angle_bins: int = 36,
+        sector_method: Literal["centroid", "equal"] = "centroid",
         copy: bool = False,
     ):
         self.adata = adata.copy() if copy else adata
-        self.bifurcation_cluster = str(bifurcation_cluster)
-        self.terminal_cell_types = list(terminal_cell_types)
-        self.condition_key = condition_key
-        self.cluster_key = cluster_key
-        self.n_bins = n_bins
-        self.sector_mode = sector_mode
+        self.root = str(root)
+        self.branches = list(branches)
+        self.condition_obs_key = condition_obs_key
+        self.obs_key = obs_key
+        self.n_angle_bins = n_angle_bins
+        self.sector_method = sector_method
 
         # Validate condition key
-        if condition_key not in adata.obs:
+        if condition_obs_key not in adata.obs:
             raise ValueError(
-                f"condition_key='{condition_key}' not found in adata.obs. "
+                f"condition_obs_key='{condition_obs_key}' not found in adata.obs. "
                 f"Available columns: {list(adata.obs.columns)}"
             )
-        self.conditions = sorted(adata.obs[condition_key].astype(str).unique().tolist())
+        self.conditions = sorted(adata.obs[condition_obs_key].astype(str).unique().tolist())
         if len(self.conditions) < 2:
             raise ValueError(
-                f"condition_key='{condition_key}' has only {len(self.conditions)} "
+                f"condition_obs_key='{condition_obs_key}' has only {len(self.conditions)} "
                 "unique value(s).  Need at least 2 conditions."
             )
 
@@ -172,8 +172,8 @@ class MultiConditionScorer:
         print(
             f"[scCS] MultiConditionScorer initialized.\n"
             f"       Conditions ({len(self.conditions)}): {self.conditions}\n"
-            f"       Bifurcation: '{bifurcation_cluster}', "
-            f"Fates: {terminal_cell_types}"
+            f"       Root: '{root}', "
+            f"Branches: {branches}"
         )
 
     # ------------------------------------------------------------------
@@ -182,9 +182,9 @@ class MultiConditionScorer:
 
     def build_embedding(
         self,
-        differentiation_metric: Union[str, np.ndarray] = "pseudotime",
-        invert_metric: bool = False,
-        scale_metric: bool = False,
+        ordering_metric: Union[str, np.ndarray] = "pseudotime",
+        invert_ordering: bool = False,
+        scale_ordering: bool = False,
         arm_scale: float = 10.0,
         jitter: float = 0.3,
         seed: int = 42,
@@ -197,10 +197,10 @@ class MultiConditionScorer:
 
         Parameters
         ----------
-        differentiation_metric : str or np.ndarray
+        ordering_metric : str or np.ndarray
             See CommitmentScorer.build_embedding().
-        invert_metric : bool
-        scale_metric : bool
+        invert_ordering : bool
+        scale_ordering : bool
             Min-max scale the metric to [0, 1] before embedding.
         arm_scale : float
         jitter : float
@@ -219,17 +219,17 @@ class MultiConditionScorer:
 
         self._scorer = CommitmentScorer(
             self.adata,
-            bifurcation_cluster=self.bifurcation_cluster,
-            terminal_cell_types=self.terminal_cell_types,
-            cluster_key=self.cluster_key,
-            n_bins=self.n_bins,
-            sector_mode=self.sector_mode,
+            root=self.root,
+            branches=self.branches,
+            obs_key=self.obs_key,
+            n_angle_bins=self.n_angle_bins,
+            sector_method=self.sector_method,
             copy=False,
         )
         self._scorer.build_embedding(
-            differentiation_metric=differentiation_metric,
-            invert_metric=invert_metric,
-            scale_metric=scale_metric,
+            ordering_metric=ordering_metric,
+            invert_ordering=invert_ordering,
+            scale_ordering=scale_ordering,
             arm_scale=arm_scale,
             jitter=jitter,
             seed=seed,
@@ -237,7 +237,7 @@ class MultiConditionScorer:
         )
         return self
 
-    def rebuild_embedding_with_subset_pseudotime(
+    def refit_pseudotime(
         self,
         scale_01: bool = True,
         arm_scale: float = 10.0,
@@ -247,10 +247,10 @@ class MultiConditionScorer:
     ) -> "MultiConditionScorer":
         """Rebuild the shared embedding using subset-local pseudotime.
 
-        See CommitmentScorer.rebuild_embedding_with_subset_pseudotime().
+        See CommitmentScorer.refit_pseudotime().
         """
         self._check_embedding()
-        self._scorer.rebuild_embedding_with_subset_pseudotime(
+        self._scorer.refit_pseudotime(
             scale_01=scale_01,
             arm_scale=arm_scale,
             jitter=jitter,
@@ -284,7 +284,7 @@ class MultiConditionScorer:
 
     def score_all_conditions(
         self,
-        compute_cell_level: bool = True,
+        cell_level: bool = True,
         k_nn: Optional[int] = None,
         n_bootstrap: int = 0,
         bootstrap_ci: float = 0.95,
@@ -297,7 +297,7 @@ class MultiConditionScorer:
 
         Parameters
         ----------
-        compute_cell_level : bool
+        cell_level : bool
             Compute per-cell fate affinity scores.
         k_nn : int, optional
             NN-smoothed entropy neighbors.
@@ -317,7 +317,7 @@ class MultiConditionScorer:
         for cond in self.conditions:
             # Mask over adata_sub (shared embedding subset)
             mask = (
-                self._scorer.adata_sub.obs[self.condition_key].astype(str) == cond
+                self._scorer.adata_sub.obs[self.condition_obs_key].astype(str) == cond
             ).values
 
             n_cond = mask.sum()
@@ -334,54 +334,17 @@ class MultiConditionScorer:
 
             results[cond] = self._scorer.score(
                 cell_mask=mask,
-                compute_cell_level=compute_cell_level,
+                cell_level=cell_level,
                 k_nn=k_nn,
                 n_bootstrap=n_bootstrap,
                 bootstrap_ci=bootstrap_ci,
                 verbose=verbose,
+                write_to_obs=False,
             )
 
         return results
 
-    def score_per_condition(
-        self,
-        compute_cell_level: bool = True,
-        scale_01_pseudotime: bool = False,
-        n_bootstrap: int = 0,
-        verbose: bool = True,
-    ) -> Dict[str, CommitmentScoreResult]:
-        """Alias for score_all_conditions() with pseudotime-aware options.
-
-        Parameters
-        ----------
-        compute_cell_level : bool
-        scale_01_pseudotime : bool
-            If True, pseudotime is NOT scaled to [0, 1] per condition
-            (preserves absolute ordering for cross-condition comparison).
-            This is the default for multi-condition analysis.
-            Note: this parameter is informational — actual scaling is
-            controlled during build_embedding().
-        n_bootstrap : int
-        verbose : bool
-
-        Returns
-        -------
-        dict : condition_label -> CommitmentScoreResult
-        """
-        if scale_01_pseudotime:
-            warnings.warn(
-                "scale_01_pseudotime=True is informational only. "
-                "Pseudotime scaling is set during build_embedding(). "
-                "For cross-condition comparison, use scale_01=False in "
-                "rebuild_embedding_with_subset_pseudotime().",
-                UserWarning,
-                stacklevel=2,
-            )
-        return self.score_all_conditions(
-            compute_cell_level=compute_cell_level,
-            n_bootstrap=n_bootstrap,
-            verbose=verbose,
-        )
+    # score_per_condition() removed in v0.6.1 — use score_all_conditions() directly.
 
     # ------------------------------------------------------------------
     # Tier 2: Statistical comparison
@@ -441,21 +404,21 @@ class MultiConditionScorer:
 
         # Masks over adata_sub
         mask_a = (
-            self._scorer.adata_sub.obs[self.condition_key].astype(str) == condition_a
+            self._scorer.adata_sub.obs[self.condition_obs_key].astype(str) == condition_a
         ).values
         mask_b = (
-            self._scorer.adata_sub.obs[self.condition_key].astype(str) == condition_b
+            self._scorer.adata_sub.obs[self.condition_obs_key].astype(str) == condition_b
         ).values
 
         # Sector definition (shared)
-        if self.sector_mode == "centroid":
+        if self.sector_method == "centroid":
             sectors, _ = centroid_sectors(
                 fate_map.fate_centroids,
                 fate_map.root_centroid,
-                n_bins=self.n_bins,
+                n_bins=self.n_angle_bins,
             )
         else:
-            sectors = equal_sectors(fate_map.k, n_bins=self.n_bins)
+            sectors = equal_sectors(fate_map.k, n_bins=self.n_angle_bins)
 
         n_cells_a = np.array([
             int(mask_a[idx].sum()) for idx in fate_map.fate_cell_indices
@@ -469,7 +432,7 @@ class MultiConditionScorer:
             vx_m, vy_m = vx[mask], vy[mask]
             mag = compute_magnitudes(vx_m, vy_m)
             ang = compute_angles(vx_m, vy_m)
-            _, M_bin = bin_angles(ang, mag, n_bins=self.n_bins)
+            _, M_bin = bin_angles(ang, mag, n_bins=self.n_angle_bins)
             M_sec = compute_sector_magnitudes(M_bin, sectors)
             return compute_pairwise_cs_matrix(
                 M_sec, n_cells_per_fate=n_cells_per_fate, normalized=True
@@ -547,7 +510,7 @@ class MultiConditionScorer:
         results: Dict[str, CommitmentScoreResult],
         test: Literal["permutation", "kruskal"] = "auto",
         n_permutations: int = 1000,
-        pval_cutoff: float = 0.05,
+        pval_threshold: float = 0.05,
         seed: int = 42,
         verbose: bool = True,
     ) -> pd.DataFrame:
@@ -565,13 +528,13 @@ class MultiConditionScorer:
         Parameters
         ----------
         results : dict
-            Output of score_all_conditions() with compute_cell_level=True.
+            Output of score_all_conditions() with cell_level=True.
         test : {'auto', 'permutation', 'kruskal'}
             Statistical test to use.  'auto' selects permutation for k=2
             and kruskal for k>2.
         n_permutations : int
             Number of permutations for the permutation test.  Default 1000.
-        pval_cutoff : float
+        pval_threshold : float
             Significance threshold.  Default 0.05.
         seed : int
         verbose : bool
@@ -589,7 +552,7 @@ class MultiConditionScorer:
             if res.cell_scores is None:
                 raise ValueError(
                     f"cell_scores not available for condition '{cond}'. "
-                    "Re-run score_all_conditions(compute_cell_level=True)."
+                    "Re-run score_all_conditions(cell_level=True)."
                 )
 
         fate_names = list(results.values())[0].fate_names
@@ -634,7 +597,7 @@ class MultiConditionScorer:
             df = pd.DataFrame(rows)
             # Bonferroni correction across fates
             df["pval_adj"] = np.minimum(df["pval"] * len(fate_names), 1.0)
-            df["significant"] = df["pval_adj"] < pval_cutoff
+            df["significant"] = df["pval_adj"] < pval_threshold
 
         else:
             # Kruskal-Wallis + pairwise Mann-Whitney
@@ -691,7 +654,7 @@ class MultiConditionScorer:
                 df.loc[mask, "pval_adj"] = np.minimum(
                     df.loc[mask, "pval"] * mask.sum(), 1.0
                 )
-            df["significant"] = df["pval_adj"] < pval_cutoff
+            df["significant"] = df["pval_adj"] < pval_threshold
 
         if verbose:
             print("\n=== Condition comparison ===")
@@ -700,11 +663,11 @@ class MultiConditionScorer:
             if len(sig) > 0:
                 print(sig[["fate", "comparison", "test", "statistic", "pval_adj"]].to_string(index=False))
             else:
-                print("  No significant differences at pval_adj < {pval_cutoff}.")
+                print(f"  No significant differences at pval_adj < {pval_threshold}.")
 
         return df
 
-    def plot_condition_comparison(
+    def plot_affinity_distributions(
         self,
         results: Dict[str, CommitmentScoreResult],
         plot_type: Literal["violin", "box", "strip"] = "violin",
@@ -722,7 +685,7 @@ class MultiConditionScorer:
         Parameters
         ----------
         results : dict
-            Output of score_all_conditions(compute_cell_level=True).
+            Output of score_all_conditions(cell_level=True).
         plot_type : {'violin', 'box', 'strip'}
         color_map : dict, optional
             condition_label -> hex color.
@@ -753,9 +716,7 @@ class MultiConditionScorer:
 
         # Colors for conditions
         if color_map is None:
-            from .plot import FATE_PALETTE
-            color_map = {c: FATE_PALETTE[i % len(FATE_PALETTE)]
-                         for i, c in enumerate(conditions)}
+            color_map = _condition_colors(conditions)
 
         ncols = min(k_fates, 3)
         nrows = int(np.ceil(k_fates / ncols))
@@ -820,8 +781,8 @@ class MultiConditionScorer:
     def fit_mixed_model(
         self,
         results: Dict[str, CommitmentScoreResult],
-        sample_key: Optional[str] = None,
-        reference_condition: Optional[str] = None,
+        replicate_key: Optional[str] = None,
+        ref_condition: Optional[str] = None,
         verbose: bool = True,
     ) -> pd.DataFrame:
         """Linear mixed-effects model on per-cell fate affinity scores.
@@ -839,12 +800,12 @@ class MultiConditionScorer:
         Parameters
         ----------
         results : dict
-            Output of score_all_conditions(compute_cell_level=True).
-        sample_key : str, optional
+            Output of score_all_conditions(cell_level=True).
+        replicate_key : str, optional
             Column in adata_sub.obs with sample/replicate IDs.
             If None, each cell is treated as its own replicate (no random
             effect — equivalent to a simple linear model).
-        reference_condition : str, optional
+        ref_condition : str, optional
             Reference condition for the fixed effect.  Defaults to the
             first condition alphabetically.
         verbose : bool
@@ -866,11 +827,11 @@ class MultiConditionScorer:
         fate_names = list(results.values())[0].fate_names
         conditions = list(results.keys())
 
-        if reference_condition is None:
-            reference_condition = sorted(conditions)[0]
-        if reference_condition not in conditions:
+        if ref_condition is None:
+            ref_condition = sorted(conditions)[0]
+        if ref_condition not in conditions:
             raise ValueError(
-                f"reference_condition='{reference_condition}' not in conditions: "
+                f"ref_condition='{ref_condition}' not in conditions: "
                 f"{conditions}"
             )
 
@@ -884,9 +845,9 @@ class MultiConditionScorer:
                 row = {"condition": cond, "obs_name": obs_name}
                 for j, fate in enumerate(fate_names):
                     row[f"affinity_{fate}"] = res.cell_scores[i, j]
-                if sample_key is not None and sample_key in self._scorer.adata_sub.obs:
+                if replicate_key is not None and replicate_key in self._scorer.adata_sub.obs:
                     row["sample_id"] = str(
-                        self._scorer.adata_sub.obs.loc[obs_name, sample_key]
+                        self._scorer.adata_sub.obs.loc[obs_name, replicate_key]
                         if obs_name in self._scorer.adata_sub.obs_names
                         else "unknown"
                     )
@@ -899,8 +860,8 @@ class MultiConditionScorer:
         # Set reference condition
         df_long["condition"] = pd.Categorical(
             df_long["condition"],
-            categories=[reference_condition]
-            + [c for c in conditions if c != reference_condition],
+            categories=[ref_condition]
+            + [c for c in conditions if c != ref_condition],
         )
 
         all_rows = []
@@ -910,7 +871,7 @@ class MultiConditionScorer:
                 continue
 
             try:
-                if sample_key is not None:
+                if replicate_key is not None:
                     # Mixed model with random intercept per sample
                     model = smf.mixedlm(
                         f"{col} ~ C(condition)",
@@ -937,7 +898,7 @@ class MultiConditionScorer:
                     all_rows.append({
                         "fate": fate,
                         "condition": cond_label,
-                        "reference": reference_condition,
+                        "reference": ref_condition,
                         "coef": float(fit.params[param_name]),
                         "std_err": float(fit.bse[param_name]),
                         "z_score": float(fit.tvalues[param_name]),
@@ -980,7 +941,7 @@ class MultiConditionScorer:
     def trajectory_shift(
         self,
         results: Dict[str, CommitmentScoreResult],
-        pseudotime_col: str = "velocity_pseudotime_sub",
+        pseudotime_key: str = "sccs_pseudotime",
         n_bootstrap: int = 500,
         seed: int = 42,
         verbose: bool = True,
@@ -999,9 +960,9 @@ class MultiConditionScorer:
         ----------
         results : dict
             Output of score_all_conditions().
-        pseudotime_col : str
+        pseudotime_key : str
             Column in adata_sub.obs with pseudotime values.
-            Defaults to 'velocity_pseudotime_sub' (subset-local pseudotime).
+            Defaults to 'sccs_pseudotime' (subset-local pseudotime).
             Falls back to 'velocity_pseudotime' if not found.
         n_bootstrap : int
             Bootstrap replicates for Wasserstein CI.  Default 500.
@@ -1027,26 +988,26 @@ class MultiConditionScorer:
         conditions = list(results.keys())
 
         # Resolve pseudotime column
-        if pseudotime_col not in self._scorer.adata_sub.obs:
+        if pseudotime_key not in self._scorer.adata_sub.obs:
             fallback = "velocity_pseudotime"
             if fallback in self._scorer.adata_sub.obs:
                 warnings.warn(
-                    f"'{pseudotime_col}' not found. Using '{fallback}'. "
+                    f"'{pseudotime_key}' not found. Using '{fallback}'. "
                     "Run recompute_subset_pseudotime() for better results.",
                     stacklevel=2,
                 )
-                pseudotime_col = fallback
+                pseudotime_key = fallback
             else:
                 raise ValueError(
-                    f"Neither '{pseudotime_col}' nor 'velocity_pseudotime' found "
+                    f"Neither '{pseudotime_key}' nor 'velocity_pseudotime' found "
                     "in adata_sub.obs. Run recompute_subset_pseudotime() first."
                 )
 
         pt_all = np.array(
-            self._scorer.adata_sub.obs[pseudotime_col], dtype=float
+            self._scorer.adata_sub.obs[pseudotime_key], dtype=float
         )
-        cluster_labels = self._scorer.adata_sub.obs[self.cluster_key].astype(str).values
-        cond_labels = self._scorer.adata_sub.obs[self.condition_key].astype(str).values
+        cluster_labels = self._scorer.adata_sub.obs[self.obs_key].astype(str).values
+        cond_labels = self._scorer.adata_sub.obs[self.condition_obs_key].astype(str).values
 
         rng = np.random.default_rng(seed)
         from itertools import combinations
@@ -1127,7 +1088,7 @@ class MultiConditionScorer:
     def plot_trajectory_shift(
         self,
         shift_df: pd.DataFrame,
-        pseudotime_col: str = "velocity_pseudotime_sub",
+        pseudotime_key: str = "sccs_pseudotime",
         color_map: Optional[Dict[str, str]] = None,
         figsize: Optional[Tuple[float, float]] = None,
         title: Optional[str] = None,
@@ -1144,7 +1105,7 @@ class MultiConditionScorer:
         ----------
         shift_df : pd.DataFrame
             Output of trajectory_shift().
-        pseudotime_col : str
+        pseudotime_key : str
             Column in adata_sub.obs with pseudotime values.
         color_map : dict, optional
             condition_label -> hex color.
@@ -1161,23 +1122,20 @@ class MultiConditionScorer:
 
         self._check_fitted()
 
-        if pseudotime_col not in self._scorer.adata_sub.obs:
-            pseudotime_col = "velocity_pseudotime"
+        if pseudotime_key not in self._scorer.adata_sub.obs:
+            pseudotime_key = "velocity_pseudotime"
 
         pt_all = np.array(
-            self._scorer.adata_sub.obs[pseudotime_col], dtype=float
+            self._scorer.adata_sub.obs[pseudotime_key], dtype=float
         )
-        cluster_labels = self._scorer.adata_sub.obs[self.cluster_key].astype(str).values
-        cond_labels = self._scorer.adata_sub.obs[self.condition_key].astype(str).values
+        cluster_labels = self._scorer.adata_sub.obs[self.obs_key].astype(str).values
+        cond_labels = self._scorer.adata_sub.obs[self.condition_obs_key].astype(str).values
 
         fate_names = shift_df["fate"].unique().tolist()
         comparisons = shift_df["comparison"].unique().tolist()
 
         if color_map is None:
-            from .plot import FATE_PALETTE
-            all_conds = self.conditions
-            color_map = {c: FATE_PALETTE[i % len(FATE_PALETTE)]
-                         for i, c in enumerate(all_conds)}
+            color_map = _condition_colors(self.conditions)
 
         n_fates = len(fate_names)
         n_comps = len(comparisons)
@@ -1258,7 +1216,7 @@ class MultiConditionScorer:
         Parameters
         ----------
         results : dict
-            Output of score_all_conditions(compute_cell_level=True).
+            Output of score_all_conditions(cell_level=True).
         prefix : str
             Column prefix.  Default: 'cs_'.
         """
@@ -1276,7 +1234,7 @@ class MultiConditionScorer:
         self._check_fitted()
         return self._scorer.plot_star(result, **kwargs)
 
-    def plot_condition_star(
+    def plot_star_grid(
         self,
         results: Dict[str, CommitmentScoreResult],
         color_map: Optional[Dict[str, str]] = None,
@@ -1325,6 +1283,118 @@ class MultiConditionScorer:
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches="tight")
         return fig
+
+
+    def plot_rose_grid(
+        self,
+        results: Dict[str, CommitmentScoreResult],
+        color_map: Optional[Dict[str, str]] = None,
+        figsize_per_panel: Tuple[float, float] = (5, 5),
+        title: Optional[str] = None,
+        save_path: Optional[str] = None,
+    ) -> matplotlib.figure.Figure:
+        """Grid of polar rose plots — one per condition.
+
+        All panels share the same radial scale, making magnitudes directly
+        comparable across conditions.
+
+        Parameters
+        ----------
+        results : dict
+            Output of score_all_conditions().
+        color_map : dict, optional
+            fate_name -> hex color.
+        figsize_per_panel : tuple
+        title : str, optional
+        save_path : str, optional
+
+        Returns
+        -------
+        fig : matplotlib Figure
+        """
+        from .plot import plot_rose_grid as _plot_rose_grid
+        return _plot_rose_grid(
+            results,
+            color_map=color_map,
+            figsize_per_panel=figsize_per_panel,
+            title=title,
+            save_path=save_path,
+        )
+
+
+    def plot_delta_cs_heatmap(self, delta_result: dict, **kwargs) -> matplotlib.figure.Figure:
+        """Heatmap of ΔCS = nCS_A − nCS_B with CI annotation.
+
+        Parameters
+        ----------
+        delta_result : dict
+            Output of compute_delta_CS().
+        **kwargs
+            Passed to :func:`scCS.plot.plot_delta_cs_heatmap`.
+
+        Returns
+        -------
+        fig : matplotlib Figure
+        """
+        from .plot import plot_delta_cs_heatmap as _plot
+        return _plot(delta_result, **kwargs)
+
+    def plot_compare_conditions_bar(
+        self,
+        results: Dict[str, CommitmentScoreResult],
+        **kwargs,
+    ) -> matplotlib.figure.Figure:
+        """Grouped bar chart of nCS per condition.
+
+        Parameters
+        ----------
+        results : dict
+            Output of score_all_conditions().
+        **kwargs
+            Passed to :func:`scCS.plot.plot_compare_conditions_bar`.
+
+        Returns
+        -------
+        fig : matplotlib Figure
+        """
+        from .plot import plot_compare_conditions_bar as _plot
+        return _plot(results, **kwargs)
+
+    def plot_commitment_vector_radar(
+        self,
+        results: Dict[str, CommitmentScoreResult],
+        **kwargs,
+    ) -> matplotlib.figure.Figure:
+        """Radar / spider chart of commitment vectors per condition.
+
+        Parameters
+        ----------
+        results : dict
+            Output of score_all_conditions().
+        **kwargs
+            Passed to :func:`scCS.plot.plot_commitment_vector_radar`.
+
+        Returns
+        -------
+        fig : matplotlib Figure
+        """
+        from .plot import plot_commitment_vector_radar as _plot
+        return _plot(results, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Representation
+    # ------------------------------------------------------------------
+
+    def __repr__(self) -> str:
+        status = "fitted" if self._fitted else "uninitialised"
+        n_cond = len(self.conditions)
+        return (
+            f"MultiConditionScorer("
+            f"root='{self.root}', "
+            f"branches={self.branches}, "
+            f"conditions={self.conditions} (n={n_cond}), "
+            f"status='{status}')"
+        )
 
     # ------------------------------------------------------------------
     # Properties

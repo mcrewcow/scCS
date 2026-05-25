@@ -73,9 +73,11 @@ Workflow
     AnnData (with scVelo velocity)
            │
            ▼
-    CommitmentScorer(adata, bifurcation_cluster, terminal_cell_types)
+    CommitmentScorer(adata, root=..., branches=[...], obs_key=...)
            │
-           ├── build_embedding()      → radial star layout in obsm['X_sccs']
+           ├── build_embedding(ordering_metric='pseudotime')
+           │                          → radial star layout in obsm['X_sccs']
+           ├── refit_pseudotime()     → fix arm coverage with subset pseudotime
            │
            ├── fit()                  → builds FateMap, projects velocity
            │
@@ -94,9 +96,29 @@ Workflow
            ├── plot_pairwise_cs()         → k×k heatmap
            ├── plot_nn_entropy_elbow()    → choose optimal k_nn
            ├── plot_expression_trends()   → gene expression vs CS axis
-           ├── get_velocity_drivers()     → ranked driver genes per fate
+           ├── get_velocity_drivers()     → ranked driver genes per fate (mean velocity)
            ├── get_deg_drivers()          → DEG analysis per fate arm
+           ├── get_velocity_fate_drivers() → velocity-fate Spearman correlation drivers
            └── get_enrichment()           → pathway enrichment per fate
+
+    MultiConditionScorer(adata, root=..., branches=[...],
+                         condition_obs_key=..., obs_key=...)
+           │
+           ├── build_embedding() / fit() / refit_pseudotime()
+           │
+           ├── score_all_conditions()     → dict[condition → CommitmentScoreResult]
+           ├── compute_delta_CS()         → ΔnCS matrix with bootstrap CI
+           ├── compare_conditions()       → per-fate statistical tests
+           ├── fit_mixed_model()          → LMM with replicate random effect
+           ├── trajectory_shift()         → KS + Wasserstein pseudotime shift
+           │
+           ├── plot_star_grid()           → side-by-side star panels per condition
+           ├── plot_rose_grid()           → side-by-side rose plots per condition
+           ├── plot_affinity_distributions() → violin/box/strip per fate
+           ├── plot_delta_cs_heatmap()    → diverging ΔCS heatmap with CI
+           ├── plot_compare_conditions_bar() → grouped nCS bar chart
+           ├── plot_commitment_vector_radar() → radar chart of commitment vectors
+           └── plot_trajectory_shift()    → KDE pseudotime distributions
 
 Citation
 --------

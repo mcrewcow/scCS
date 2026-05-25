@@ -50,13 +50,13 @@ import scCS
 
 scorer = scCS.CommitmentScorer(
     adata,
-    bifurcation_cluster="17",           # leiden cluster at the branching point
-    terminal_cell_types=["homeostatic", "activated"],
-    cluster_key="leiden",
+    root="17",                              # leiden cluster at the branching point
+    branches=["homeostatic", "activated"],  # terminal fate clusters
+    obs_key="leiden",
 )
-scorer.build_embedding(differentiation_metric="pseudotime")
+scorer.build_embedding(ordering_metric="pseudotime")
 scorer.fit()
-result = scorer.score(compute_cell_level=True)
+result = scorer.score(cell_level=True)
 
 print(result.summary())
 scorer.plot_star(result)
@@ -74,8 +74,9 @@ scorer.plot_commitment_bar(result)
 | **unCS / nCS** | Pairwise commitment scores, unnormalized and cell-count-corrected |
 | **Per-fate entropy** | Binary cell entropy per fate — how decisive cells are toward each fate individually |
 | **NN-smoothed entropy** | Nearest-neighbor smoothed per-cell entropy in the scCS embedding; elbow plots to choose k |
-| **Driver genes** | Velocity-based and DEG-based driver genes per fate arm |
+| **Driver genes** | Velocity-based, DEG-based, and velocity-fate correlation drivers per fate arm |
 | **Pathway enrichment** | Enrichr ORA (KEGG, GO BP, Reactome) per fate, up and down |
+| **Multi-condition analysis** | `MultiConditionScorer` for comparing commitment across conditions |
 | **Color map support** | Pass your original scanpy/Seurat cluster colors to all plots |
 
 ---
@@ -94,7 +95,7 @@ result.per_fate_entropy   # e.g. array([0.31, 0.28]) for k=2
 
 # 3. NN-smoothed per-cell entropy — shape (n_cells,)
 #    Average cell_scores over k nearest neighbors in X_sccs, then compute entropy
-result = scorer.score(compute_cell_level=True, k_nn=15)
+result = scorer.score(cell_level=True, k_nn=15)
 result.nn_cell_entropy    # also stored in adata_sub.obs["cs_nn_entropy"]
 
 # Find the optimal k_nn with elbow plots
@@ -103,7 +104,7 @@ fig = scorer.plot_nn_entropy_elbow(k_nn_range=range(5, 51, 5))
 
 ---
 
-## Full workflow
+## Full workflow — single condition
 
 ```python
 import scCS
@@ -111,19 +112,23 @@ import scCS
 # 1. Initialize
 scorer = scCS.CommitmentScorer(
     adata,
-    bifurcation_cluster="17",
-    terminal_cell_types=["homeostatic", "activated"],
-    cluster_key="leiden",
+    root="17",
+    branches=["homeostatic", "activated"],
+    obs_key="leiden",
 )
 
 # 2. Build radial star embedding
-scorer.build_embedding(differentiation_metric="pseudotime")
+scorer.build_embedding(ordering_metric="pseudotime")
+
+# Optional: recompute pseudotime on the subset subgraph for better arm coverage
+scorer.compute_local_pseudotime(scale_01=True)
+scorer.refit_pseudotime()
 
 # 3. Fit (builds FateMap, projects velocity)
 scorer.fit()
 
 # 4. Score
-result = scorer.score(compute_cell_level=True, k_nn=15)
+result = scorer.score(cell_level=True, k_nn=15, n_bootstrap=500)
 print(result.summary())
 
 # 5. Plots
@@ -134,16 +139,111 @@ scorer.plot_pairwise_cs(result)
 scorer.plot_nn_entropy_elbow(k_nn_range=range(5, 51, 5))
 
 # 6. Driver genes
-vel_drivers = scorer.get_velocity_drivers(n_top=50)
-deg_drivers = scorer.get_deg_drivers(n_top=50)
+vel_drivers = scorer.get_velocity_drivers(n_top_genes=50)
+deg_drivers = scorer.get_deg_drivers(n_top_genes=50)
+vf_drivers  = scorer.get_velocity_fate_drivers(result, n_top_genes=50)
 
 # 7. Pathway enrichment
 enrichment = scorer.get_enrichment(deg_drivers, organism="mouse")
 
-# 8. Compare across conditions
-subset_results = scorer.score_per_subset("condition")
+# 8. Compare across subsets
+subset_results = scorer.score_per_subset(split_by="condition")
 scorer.plot_subset_comparison(subset_results)
+
+# 9. Transfer labels to full adata
+scorer.transfer_labels(adata, result)
 ```
+
+---
+
+## Multi-condition analysis
+
+```python
+import scCS
+
+# Initialize with condition key
+mscorer = scCS.MultiConditionScorer(
+    adata,
+    root="17",
+    branches=["homeostatic", "activated"],
+    condition_obs_key="treatment",   # column with condition labels
+    obs_key="leiden",
+)
+
+# Build SHARED embedding on pooled data (critical for comparability)
+mscorer.build_embedding(ordering_metric="pseudotime")
+mscorer.refit_pseudotime(scale_01=False)  # preserve absolute pseudotime ordering
+mscorer.fit()
+
+# Score each condition separately
+results = mscorer.score_all_conditions(cell_level=True)
+
+# Statistical comparison
+delta = mscorer.compute_delta_CS("control", "treated", n_bootstrap=500)
+stats = mscorer.compare_conditions(results, pval_threshold=0.05)
+shift = mscorer.trajectory_shift(results)
+lme   = mscorer.fit_mixed_model(results, replicate_key="sample_id")
+
+# Visualizations
+mscorer.plot_star_grid(results)                    # side-by-side star plots
+mscorer.plot_rose_grid(results)                    # per-condition rose plots
+mscorer.plot_affinity_distributions(results)       # violin plots per fate
+mscorer.plot_delta_cs_heatmap(delta)               # ΔCS heatmap with CI
+mscorer.plot_compare_conditions_bar(results)       # grouped bar chart of nCS
+mscorer.plot_commitment_vector_radar(results)      # radar chart of commitment vectors
+mscorer.plot_trajectory_shift(shift)               # KDE plots of pseudotime shift
+```
+
+---
+
+## Driver genes
+
+scCS provides three complementary driver gene methods:
+
+```python
+# 1. Velocity-based: rank genes by mean velocity in each fate arm
+vel_drivers = scorer.get_velocity_drivers(n_top_genes=50)
+
+# 2. DEG-based: Wilcoxon test, fate arm vs progenitor
+deg_drivers = scorer.get_deg_drivers(
+    n_top_genes=50,
+    pval_threshold=0.05,
+    logfc_threshold=0.25,
+)
+
+# 3. Velocity-fate correlation (CellRank-style):
+#    Spearman r between gene velocity and per-cell fate affinity
+#    Requires cell_level=True in score()
+result = scorer.score(cell_level=True)
+vf_drivers = scorer.get_velocity_fate_drivers(
+    result,
+    n_top_genes=50,
+    pval_threshold=0.05,
+)
+# Returns dict: fate_name -> DataFrame[gene, spearman_r, pval_adj, ...]
+```
+
+---
+
+## Visualizations
+
+| Function | Description |
+|----------|-------------|
+| `plot_star_embedding()` | Radial star layout, colored by fate/pseudotime/entropy/affinity |
+| `plot_star_panels()` | Multi-panel star embedding |
+| `plot_rose()` | Polar rose of cumulative velocity magnitudes |
+| `plot_rose_grid()` | Per-condition rose grid (shared radial scale) |
+| `plot_pairwise_cs()` | Heatmap of pairwise nCS/unCS |
+| `plot_commitment_bar()` | Bar chart of unCS vs nCS per fate pair |
+| `plot_commitment_heatmap()` | Per-cell fate affinity heatmap |
+| `plot_subset_comparison()` | CS comparison across subsets |
+| `plot_expression_trends()` | Gene expression vs pseudotime/affinity |
+| `plot_nn_entropy_elbow()` | Elbow plots for choosing k_nn |
+| `plot_affinity_distributions()` | Violin/box plots of per-cell affinities by condition |
+| `plot_delta_cs_heatmap()` | ΔCS heatmap with bootstrap CI annotation |
+| `plot_compare_conditions_bar()` | Grouped bar chart of nCS per condition |
+| `plot_commitment_vector_radar()` | Radar chart of commitment vectors per condition |
+| `plot_trajectory_shift()` | KDE plots of pseudotime distributions by condition |
 
 ---
 
@@ -155,11 +255,11 @@ Reproducing the k=2 microglia bifurcation from Kriukov et al. (2025)
 ```python
 scorer = scCS.CommitmentScorer(
     adata,
-    bifurcation_cluster="17",
-    terminal_cell_types=["homeostatic", "activated"],
-    cluster_key="leiden",
+    root="17",
+    branches=["homeostatic", "activated"],
+    obs_key="leiden",
 )
-scorer.build_embedding(differentiation_metric="pseudotime")
+scorer.build_embedding(ordering_metric="pseudotime")
 scorer.fit()
 result = scorer.score()
 

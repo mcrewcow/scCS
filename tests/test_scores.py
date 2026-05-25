@@ -651,10 +651,10 @@ class TestStarEmbedding:
     def test_embedding_shape(self):
         adata_sub = build_star_embedding(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
         )
         assert "X_sccs" in adata_sub.obsm
         assert adata_sub.obsm["X_sccs"].shape == (300, 2)
@@ -662,10 +662,10 @@ class TestStarEmbedding:
     def test_progenitor_near_origin(self):
         adata_sub = build_star_embedding(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
             jitter=0.0,
         )
         coords = adata_sub.obsm["X_sccs"]
@@ -677,10 +677,10 @@ class TestStarEmbedding:
     def test_fate_cells_farther_than_progenitor(self):
         adata_sub = build_star_embedding(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
             jitter=0.0,
         )
         coords = adata_sub.obsm["X_sccs"]
@@ -697,10 +697,10 @@ class TestStarEmbedding:
         """k=2 arms should be ~180° apart."""
         adata_sub = build_star_embedding(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
             jitter=0.0,
         )
         arm_dirs = adata_sub.uns["sccs"]["arm_dirs"]
@@ -713,10 +713,10 @@ class TestStarEmbedding:
         adata3 = _make_adata_k3()
         adata3_sub = build_star_embedding(
             adata3,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2", "3"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
+            root="0",
+            branches=["1", "2", "3"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
             jitter=0.0,
         )
         arm_dirs = adata3_sub.uns["sccs"]["arm_dirs"]
@@ -729,22 +729,22 @@ class TestStarEmbedding:
     def test_arm_assignment_stored(self):
         adata_sub = build_star_embedding(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
         )
         assert "sccs_arm" in adata_sub.obs
-        assert "sccs_arm_name" in adata_sub.obs
+        assert "sccs_branch" in adata_sub.obs
 
     def test_pseudotime_ordering_along_arm(self):
         """Higher pseudotime cells should be farther from origin on their arm."""
         adata_sub = build_star_embedding(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
             jitter=0.0,
         )
         coords = adata_sub.obsm["X_sccs"]
@@ -760,21 +760,21 @@ class TestStarEmbedding:
         with pytest.raises(ValueError, match="not found in adata.obs"):
             build_star_embedding(
                 self.adata,
-                bifurcation_cluster="0",
-                terminal_cell_types=["1", "2"],
-                cluster_key="leiden",
-                differentiation_metric="nonexistent_column",
+                root="0",
+                branches=["1", "2"],
+                obs_key="leiden",
+                ordering_metric="nonexistent_column",
             )
 
     def test_invert_metric(self):
         """Inverted metric should flip the ordering."""
         adata_sub = build_star_embedding(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
-            invert_metric=True,
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
+            invert_ordering=True,
             jitter=0.0,
         )
         coords = adata_sub.obsm["X_sccs"]
@@ -797,30 +797,30 @@ class TestFateMap:
         # build_star_embedding now returns adata_sub
         self.adata_sub = build_star_embedding(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
-            differentiation_metric="pseudotime",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
+            ordering_metric="pseudotime",
         )
 
     def test_build_fate_map_basic(self):
         fm = build_fate_map(
             self.adata_sub,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
         )
         assert isinstance(fm, FateMap)
         assert fm.k == 2
-        assert fm.bifurcation_cluster == "0"
+        assert fm.root == "0"
         assert fm.fate_names == ["1", "2"]
 
     def test_root_cells_correct(self):
         fm = build_fate_map(
             self.adata_sub,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
         )
         expected_root = np.where(self.adata_sub.obs["leiden"].astype(str) == "0")[0]
         np.testing.assert_array_equal(np.sort(fm.root_cells), np.sort(expected_root))
@@ -828,9 +828,9 @@ class TestFateMap:
     def test_fate_cell_indices_correct(self):
         fm = build_fate_map(
             self.adata_sub,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
         )
         for j, name in enumerate(["1", "2"]):
             expected = np.where(self.adata_sub.obs["leiden"].astype(str) == name)[0]
@@ -841,9 +841,9 @@ class TestFateMap:
     def test_root_centroid_near_origin(self):
         fm = build_fate_map(
             self.adata_sub,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
         )
         # Root centroid should be near (0, 0) in the star embedding
         assert np.linalg.norm(fm.root_centroid) < 1.0
@@ -852,38 +852,38 @@ class TestFateMap:
         with pytest.raises(ValueError, match="not found"):
             build_fate_map(
                 self.adata_sub,
-                bifurcation_cluster="999",
-                terminal_cell_types=["1", "2"],
-                cluster_key="leiden",
+                root="999",
+                branches=["1", "2"],
+                obs_key="leiden",
             )
 
     def test_missing_fate_warns(self):
         with pytest.warns(UserWarning):
             fm = build_fate_map(
                 self.adata_sub,
-                bifurcation_cluster="0",
-                terminal_cell_types=["1", "2", "nonexistent"],
-                cluster_key="leiden",
+                root="0",
+                branches=["1", "2", "nonexistent"],
+                obs_key="leiden",
             )
         assert fm.k == 2  # nonexistent fate skipped
 
     def test_summary_string(self):
         fm = build_fate_map(
             self.adata_sub,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
         )
         s = fm.summary()
         assert "FateMap" in s
-        assert "bifurcation_cluster='0'" in s
+        assert "root='0'" in s
 
     def test_arm_angles_stored(self):
         fm = build_fate_map(
             self.adata_sub,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
         )
         assert len(fm.arm_angles_deg) == 2
         # k=2 arms should be ~180° apart
@@ -1060,14 +1060,14 @@ class TestCommitmentScorerPipeline:
         from scCS import CommitmentScorer
         scorer = CommitmentScorer(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
-            cluster_key="leiden",
+            root="0",
+            branches=["1", "2"],
+            obs_key="leiden",
         )
         return scorer
 
     def _build_and_fit(self, scorer):
-        scorer.build_embedding(differentiation_metric="pseudotime")
+        scorer.build_embedding(ordering_metric="pseudotime")
         # Inject synthetic velocity vectors (no scVelo needed)
         np.random.seed(42)
         vx = np.concatenate([
@@ -1120,14 +1120,14 @@ class TestCommitmentScorerPipeline:
     def test_mean_cell_entropy_lower_than_population_entropy_for_bifurcation(self):
         scorer = self._make_scorer()
         scorer = self._build_and_fit(scorer)
-        result = scorer.score(verbose=False, compute_cell_level=True)
+        result = scorer.score(verbose=False, cell_level=True)
         assert not np.isnan(result.mean_cell_entropy)
         assert not np.isnan(result.population_entropy)
 
     def test_per_fate_entropy_shape_and_range(self):
         scorer = self._make_scorer()
         scorer = self._build_and_fit(scorer)
-        result = scorer.score(verbose=False, compute_cell_level=True)
+        result = scorer.score(verbose=False, cell_level=True)
         assert result.per_fate_entropy.shape == (2,)
         assert np.all(result.per_fate_entropy >= 0.0 - 1e-10)
         assert np.all(result.per_fate_entropy <= 1.0 + 1e-10)
@@ -1135,7 +1135,7 @@ class TestCommitmentScorerPipeline:
     def test_nn_cell_entropy_computed_when_k_nn_set(self):
         scorer = self._make_scorer()
         scorer = self._build_and_fit(scorer)
-        result = scorer.score(verbose=False, compute_cell_level=True, k_nn=10)
+        result = scorer.score(verbose=False, cell_level=True, k_nn=10)
         assert result.nn_cell_entropy is not None
         assert result.nn_cell_entropy.shape == (scorer.adata_sub.n_obs,)
         assert result.nn_k == 10
@@ -1144,14 +1144,14 @@ class TestCommitmentScorerPipeline:
     def test_nn_cell_entropy_none_when_k_nn_not_set(self):
         scorer = self._make_scorer()
         scorer = self._build_and_fit(scorer)
-        result = scorer.score(verbose=False, compute_cell_level=True)
+        result = scorer.score(verbose=False, cell_level=True)
         assert result.nn_cell_entropy is None
         assert result.nn_k is None
 
     def test_cell_scores_written_to_obs(self):
         scorer = self._make_scorer()
         scorer = self._build_and_fit(scorer)
-        scorer.score(verbose=False, compute_cell_level=True)
+        scorer.score(verbose=False, cell_level=True)
         # Cell scores are written to scorer.adata_sub.obs (the subset)
         assert "cs_1" in scorer.adata_sub.obs
         assert "cs_2" in scorer.adata_sub.obs
@@ -1161,7 +1161,7 @@ class TestCommitmentScorerPipeline:
     def test_cell_scores_row_normalized(self):
         scorer = self._make_scorer()
         scorer = self._build_and_fit(scorer)
-        result = scorer.score(verbose=False, compute_cell_level=True)
+        result = scorer.score(verbose=False, cell_level=True)
         np.testing.assert_allclose(
             result.cell_scores.sum(axis=1), 1.0, atol=1e-10
         )
@@ -1169,13 +1169,13 @@ class TestCommitmentScorerPipeline:
     def test_fateA_dominant_for_east_pointing_cells(self):
         """Cells pointing East should prefer fateA (arm at 0°)."""
         scorer = self._make_scorer()
-        scorer.build_embedding(differentiation_metric="pseudotime")
+        scorer.build_embedding(ordering_metric="pseudotime")
         # All cells point East
         vx = np.ones(300)
         vy = np.zeros(300)
         scorer.load_velocity_vectors(vx, vy)
         scorer.fit(verbose=False)
-        result = scorer.score(verbose=False, compute_cell_level=True)
+        result = scorer.score(verbose=False, cell_level=True)
         # fateA is at arm 0 (0°), fateB at arm 1 (180°)
         # East-pointing velocity -> fateA should have higher M_sector
         fate_a_idx = result.fate_names.index("1")
@@ -1197,8 +1197,8 @@ class TestCommitmentScorerPipeline:
         from scCS import CommitmentScorer
         scorer = CommitmentScorer(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
+            root="0",
+            branches=["1", "2"],
         )
         with pytest.raises(RuntimeError, match="not fitted"):
             scorer.score()
@@ -1207,8 +1207,8 @@ class TestCommitmentScorerPipeline:
         from scCS import CommitmentScorer
         scorer = CommitmentScorer(
             self.adata,
-            bifurcation_cluster="0",
-            terminal_cell_types=["1", "2"],
+            root="0",
+            branches=["1", "2"],
         )
         with pytest.raises(RuntimeError, match="build_embedding"):
             scorer.fit()
@@ -1233,3 +1233,544 @@ def _make_adata_k3(n_cells: int = 400, seed: int = 0) -> ad.AnnData:
     adata.obs["leiden"] = pd.Categorical(labels)
     adata.obs["velocity_pseudotime"] = pseudotime
     return adata
+
+# ---------------------------------------------------------------------------
+# 20. MultiConditionScorer tests
+# ---------------------------------------------------------------------------
+
+def _make_adata_multicond(n_per_cond: int = 150, seed: int = 0) -> "ad.AnnData":
+    """Synthetic AnnData with 2 conditions, 3 clusters (0=progenitor, 1/2=fates)."""
+    rng = np.random.default_rng(seed)
+    n_total = n_per_cond * 2
+    X = rng.normal(size=(n_total, 20))
+
+    # 3 clusters: 0=progenitor (50/cond), 1=fateA (50/cond), 2=fateB (50/cond)
+    labels = np.array(["0"] * 50 + ["1"] * 50 + ["2"] * 50 +
+                      ["0"] * 50 + ["1"] * 50 + ["2"] * 50)
+    conditions = np.array(["ctrl"] * n_per_cond + ["treat"] * n_per_cond)
+    pseudotime = np.concatenate([
+        rng.uniform(0.0, 0.3, 50),   # ctrl progenitor
+        rng.uniform(0.5, 1.0, 50),   # ctrl fateA
+        rng.uniform(0.5, 1.0, 50),   # ctrl fateB
+        rng.uniform(0.0, 0.3, 50),   # treat progenitor
+        rng.uniform(0.5, 1.0, 50),   # treat fateA
+        rng.uniform(0.5, 1.0, 50),   # treat fateB
+    ])
+    adata = ad.AnnData(X=X)
+    adata.obs["leiden"] = pd.Categorical(labels)
+    adata.obs["condition"] = pd.Categorical(conditions)
+    adata.obs["velocity_pseudotime"] = pseudotime
+    return adata
+
+
+def _make_multicond_scorer(adata=None):
+    """Build and fit a MultiConditionScorer on synthetic data."""
+    from scCS.multiconditional import MultiConditionScorer
+
+    if adata is None:
+        adata = _make_adata_multicond()
+
+    mscorer = MultiConditionScorer(
+        adata,
+        root="0",
+        branches=["1", "2"],
+        condition_obs_key="condition",
+        obs_key="leiden",
+    )
+    mscorer.build_embedding(ordering_metric="pseudotime", verbose=False)
+
+    # Inject synthetic velocity vectors (no scVelo needed)
+    rng = np.random.default_rng(42)
+    n_sub = mscorer._scorer.adata_sub.n_obs
+    vx = rng.normal(0.5, 0.3, n_sub)   # slight East bias
+    vy = rng.normal(0.0, 0.2, n_sub)
+    mscorer._scorer.load_velocity_vectors(vx, vy)
+    mscorer.fit(verbose=False)
+    return mscorer
+
+
+class TestMultiConditionScorer:
+    """Tests for MultiConditionScorer and all Tier 2/3 methods."""
+
+    def setup_method(self):
+        self.adata = _make_adata_multicond()
+        self.mscorer = _make_multicond_scorer(self.adata)
+
+    # ------------------------------------------------------------------
+    # Initialization
+    # ------------------------------------------------------------------
+
+    def test_conditions_detected(self):
+        assert set(self.mscorer.conditions) == {"ctrl", "treat"}
+
+    def test_repr_contains_key_info(self):
+        r = repr(self.mscorer)
+        assert "MultiConditionScorer" in r
+        assert "fitted" in r
+        assert "ctrl" in r or "treat" in r
+
+    def test_invalid_condition_key_raises(self):
+        from scCS.multiconditional import MultiConditionScorer
+        with pytest.raises(ValueError, match="not found in adata.obs"):
+            MultiConditionScorer(
+                self.adata,
+                root="0",
+                branches=["1", "2"],
+                condition_obs_key="nonexistent_col",
+            )
+
+    def test_single_condition_raises(self):
+        from scCS.multiconditional import MultiConditionScorer
+        adata_single = self.adata.copy()
+        adata_single.obs["condition"] = "ctrl"
+        with pytest.raises(ValueError, match="at least 2 conditions"):
+            MultiConditionScorer(
+                adata_single,
+                root="0",
+                branches=["1", "2"],
+                condition_obs_key="condition",
+            )
+
+    # ------------------------------------------------------------------
+    # score_all_conditions
+    # ------------------------------------------------------------------
+
+    def test_score_all_conditions_returns_both(self):
+        results = self.mscorer.score_all_conditions(verbose=False)
+        assert set(results.keys()) == {"ctrl", "treat"}
+
+    def test_score_all_conditions_result_type(self):
+        results = self.mscorer.score_all_conditions(verbose=False)
+        for cond, res in results.items():
+            assert isinstance(res, CommitmentScoreResult),                 f"Expected CommitmentScoreResult for '{cond}', got {type(res)}"
+
+    def test_score_all_conditions_fate_names(self):
+        results = self.mscorer.score_all_conditions(verbose=False)
+        for cond, res in results.items():
+            assert res.fate_names == ["1", "2"],                 f"Unexpected fate_names for '{cond}': {res.fate_names}"
+
+    def test_score_all_conditions_commitment_vector_sums_to_one(self):
+        results = self.mscorer.score_all_conditions(verbose=False)
+        for cond, res in results.items():
+            assert res.commitment_vector.sum() == pytest.approx(1.0),                 f"commitment_vector does not sum to 1 for '{cond}'"
+
+    def test_score_all_conditions_cell_scores_available(self):
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        for cond, res in results.items():
+            assert res.cell_scores is not None,                 f"cell_scores is None for '{cond}'"
+            assert res.cell_scores.shape[1] == 2
+
+    # ------------------------------------------------------------------
+    # Regression test: no obs clobbering (Issue #2)
+    # ------------------------------------------------------------------
+
+    def test_score_all_conditions_does_not_clobber_obs(self):
+        """Regression test for Issue #2: score_all_conditions(write_to_obs=False)
+        must NOT write cs_* columns to adata_sub.obs during the loop.
+
+        Before the fix, each condition's score() call would overwrite
+        cs_1, cs_2, cs_entropy, cs_dominant_fate in adata_sub.obs, so only
+        the last condition's values survived.  After the fix, write_to_obs=False
+        is passed internally, so adata_sub.obs is not touched by the loop.
+        """
+        # Use a fresh scorer to ensure no prior score() call has written obs columns
+        mscorer = _make_multicond_scorer()
+        adata_sub = mscorer._scorer.adata_sub
+        # Ensure cs_1 is not already in obs
+        for col in ["cs_1", "cs_2", "cs_entropy", "cs_dominant_fate"]:
+            if col in adata_sub.obs.columns:
+                del adata_sub.obs[col]
+
+        results = mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+
+        # After score_all_conditions(), adata_sub.obs should NOT have cs_1/cs_2
+        # written by the loop (write_to_obs=False is passed internally).
+        assert "cs_1" not in adata_sub.obs.columns, (
+            "cs_1 was written to adata_sub.obs by score_all_conditions() loop "
+            "(write_to_obs=False should prevent this)"
+        )
+        assert "cs_2" not in adata_sub.obs.columns, (
+            "cs_2 was written to adata_sub.obs by score_all_conditions() loop"
+        )
+
+        # Both conditions should have valid cell_scores in the results dict
+        for cond, res in results.items():
+            assert res.cell_scores is not None, f"cell_scores is None for '{cond}'"
+            assert res.cell_scores.shape[1] == 2
+
+
+    # ------------------------------------------------------------------
+    # compute_delta_CS
+    # ------------------------------------------------------------------
+
+    def test_compute_delta_cs_keys(self):
+        delta = self.mscorer.compute_delta_CS(
+            "ctrl", "treat", n_bootstrap=20, verbose=False
+        )
+        for key in ["delta_nCS", "ci_low", "ci_high", "nCS_A", "nCS_B",
+                    "fate_names", "condition_a", "condition_b"]:
+            assert key in delta, f"Missing key '{key}' in delta_CS result"
+
+    def test_compute_delta_cs_shape(self):
+        delta = self.mscorer.compute_delta_CS(
+            "ctrl", "treat", n_bootstrap=20, verbose=False
+        )
+        assert delta["delta_nCS"].shape == (2, 2)
+        assert delta["ci_low"].shape == (2, 2)
+        assert delta["ci_high"].shape == (2, 2)
+
+    def test_compute_delta_cs_ci_ordering(self):
+        """ci_low <= delta_nCS <= ci_high (element-wise, ignoring inf/nan)."""
+        delta = self.mscorer.compute_delta_CS(
+            "ctrl", "treat", n_bootstrap=50, verbose=False
+        )
+        d = delta["delta_nCS"]
+        lo = delta["ci_low"]
+        hi = delta["ci_high"]
+        finite = np.isfinite(d) & np.isfinite(lo) & np.isfinite(hi)
+        assert np.all(lo[finite] <= hi[finite]), "ci_low > ci_high for some entries"
+
+    def test_compute_delta_cs_invalid_condition_raises(self):
+        with pytest.raises(ValueError, match="not found"):
+            self.mscorer.compute_delta_CS("ctrl", "nonexistent", verbose=False)
+
+    # ------------------------------------------------------------------
+    # compare_conditions
+    # ------------------------------------------------------------------
+
+    def test_compare_conditions_returns_dataframe(self):
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_conditions(results, verbose=False)
+        assert isinstance(df, pd.DataFrame)
+
+    def test_compare_conditions_columns(self):
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_conditions(results, verbose=False)
+        for col in ["fate", "test", "statistic", "pval", "pval_adj", "significant"]:
+            assert col in df.columns, f"Missing column '{col}'"
+
+    def test_compare_conditions_pval_adj_in_range(self):
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_conditions(results, verbose=False)
+        assert df["pval_adj"].between(0.0, 1.0).all(),             "pval_adj values outside [0, 1]"
+
+    def test_compare_conditions_fstring_fix(self):
+        """Regression test: verbose print should not contain literal {pval_cutoff}."""
+        import io, sys
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        # Capture stdout
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            self.mscorer.compare_conditions(results, verbose=True, pval_threshold=0.05)
+        finally:
+            sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        # The f-string fix: should NOT contain the literal string "{pval_cutoff}"
+        assert "{pval_cutoff}" not in output,             "f-string not interpolated: found literal '{pval_cutoff}' in output"
+        # Should contain the actual value
+        assert "0.05" in output, "Expected pval_cutoff value '0.05' in output"
+
+    def test_compare_conditions_kruskal_path(self):
+        """k>2 conditions should use kruskal-wallis test."""
+        # Build a 3-condition dataset by relabeling the last 50 cells as "extra"
+        adata3cond = self.adata.copy()
+        cond_vals = adata3cond.obs["condition"].astype(str).values.copy()
+        cond_vals[-50:] = "extra"
+        adata3cond.obs["condition"] = pd.Categorical(cond_vals)
+
+        from scCS.multiconditional import MultiConditionScorer
+        ms3 = MultiConditionScorer(
+            adata3cond,
+            root="0",
+            branches=["1", "2"],
+            condition_obs_key="condition",
+            obs_key="leiden",
+        )
+        ms3.build_embedding(ordering_metric="pseudotime", verbose=False)
+        rng = np.random.default_rng(7)
+        n_sub = ms3._scorer.adata_sub.n_obs
+        ms3._scorer.load_velocity_vectors(
+            rng.normal(0.5, 0.3, n_sub), rng.normal(0.0, 0.2, n_sub)
+        )
+        ms3.fit(verbose=False)
+        results3 = ms3.score_all_conditions(cell_level=True, verbose=False)
+        df3 = ms3.compare_conditions(results3, verbose=False)
+        assert "kruskal-wallis" in df3["test"].values,             "Expected kruskal-wallis test for k>2 conditions"
+        assert "mann-whitney" in df3["test"].values,             "Expected mann-whitney pairwise tests for k>2 conditions"
+
+    # ------------------------------------------------------------------
+    # trajectory_shift
+    # ------------------------------------------------------------------
+
+    def test_trajectory_shift_returns_dataframe(self):
+        # Add subset pseudotime to adata_sub
+        n_sub = self.mscorer._scorer.adata_sub.n_obs
+        self.mscorer._scorer.adata_sub.obs["sccs_pseudotime"] =             np.random.default_rng(0).uniform(0, 1, n_sub)
+        results = self.mscorer.score_all_conditions(verbose=False)
+        df = self.mscorer.trajectory_shift(
+            results, n_bootstrap=20, verbose=False
+        )
+        assert isinstance(df, pd.DataFrame)
+
+    def test_trajectory_shift_columns(self):
+        n_sub = self.mscorer._scorer.adata_sub.n_obs
+        self.mscorer._scorer.adata_sub.obs["sccs_pseudotime"] =             np.random.default_rng(1).uniform(0, 1, n_sub)
+        results = self.mscorer.score_all_conditions(verbose=False)
+        df = self.mscorer.trajectory_shift(
+            results, n_bootstrap=20, verbose=False
+        )
+        for col in ["fate", "comparison", "ks_stat", "ks_pval", "wasserstein",
+                    "ks_pval_adj", "significant"]:
+            assert col in df.columns, f"Missing column '{col}'"
+
+    # ------------------------------------------------------------------
+    # fit_mixed_model
+    # ------------------------------------------------------------------
+
+    def test_fit_mixed_model_runs(self):
+        pytest.importorskip("statsmodels")
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.fit_mixed_model(results, verbose=False)
+        assert isinstance(df, pd.DataFrame)
+
+    def test_fit_mixed_model_columns(self):
+        pytest.importorskip("statsmodels")
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.fit_mixed_model(results, verbose=False)
+        if not df.empty:
+            for col in ["fate", "condition", "coef", "pval", "pval_adj", "significant"]:
+                assert col in df.columns, f"Missing column '{col}'"
+
+
+
+# ===========================================================================
+# TestVelocityFateDrivers
+# ===========================================================================
+
+class TestVelocityFateDrivers:
+    """Tests for get_velocity_fate_drivers() — velocity-fate correlation method."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Build a minimal scorer with a synthetic velocity layer."""
+        import anndata as ad
+        rng = np.random.default_rng(42)
+        n_cells = 200
+        n_genes = 50
+
+        # Synthetic expression + velocity
+        X = rng.poisson(2.0, (n_cells, n_genes)).astype(float)
+        velocity = rng.normal(0.0, 1.0, (n_cells, n_genes))
+
+        # Cluster labels: 0=root, 1=fateA, 2=fateB
+        leiden = np.array(["0"] * 60 + ["1"] * 70 + ["2"] * 70)
+        pseudotime = np.concatenate([
+            rng.uniform(0.0, 0.2, 60),
+            rng.uniform(0.3, 1.0, 70),
+            rng.uniform(0.3, 1.0, 70),
+        ])
+
+        adata = ad.AnnData(X=X)
+        adata.obs["leiden"] = pd.Categorical(leiden)
+        adata.obs["velocity_pseudotime"] = pseudotime
+        adata.var_names = [f"gene_{i}" for i in range(n_genes)]
+        adata.layers["velocity"] = velocity
+
+        import scipy.sparse as sp
+        adata.obsp["velocity_graph"] = sp.eye(n_cells, format="csr") * 0.1
+
+        from scCS.trajectory import CommitmentScorer
+        scorer = CommitmentScorer(
+            adata, root="0", branches=["1", "2"], obs_key="leiden"
+        )
+        scorer.build_embedding(ordering_metric="pseudotime", verbose=False)
+        n_sub = scorer.adata_sub.n_obs
+        scorer.load_velocity_vectors(
+            rng.normal(0.5, 0.3, n_sub), rng.normal(0.0, 0.2, n_sub)
+        )
+        scorer.fit(verbose=False)
+        self.scorer = scorer
+        self.result = scorer.score(cell_level=True, verbose=False)
+
+    def test_returns_dict_with_fate_keys(self):
+        drivers = self.scorer.get_velocity_fate_drivers(self.result, n_top_genes=5)
+        assert isinstance(drivers, dict)
+        for fate in ["1", "2"]:
+            assert fate in drivers, f"Missing fate key '{fate}'"
+
+    def test_dataframe_columns(self):
+        drivers = self.scorer.get_velocity_fate_drivers(self.result, n_top_genes=5)
+        expected_cols = {"gene", "spearman_r", "pval", "pval_adj",
+                         "mean_velocity", "delta_velocity", "significant"}
+        for fate, df in drivers.items():
+            assert expected_cols.issubset(set(df.columns)), (
+                f"Missing columns for fate '{fate}': "
+                f"{expected_cols - set(df.columns)}"
+            )
+
+    def test_spearman_r_in_range(self):
+        drivers = self.scorer.get_velocity_fate_drivers(self.result, n_top_genes=5)
+        for fate, df in drivers.items():
+            assert df["spearman_r"].between(-1.0, 1.0).all(), (
+                f"Spearman r out of [-1, 1] for fate '{fate}'"
+            )
+
+    def test_top_gene_has_highest_correlation(self):
+        drivers = self.scorer.get_velocity_fate_drivers(self.result, n_top_genes=5)
+        for fate, df in drivers.items():
+            assert df["spearman_r"].iloc[0] == df["spearman_r"].max(), (
+                f"Top gene does not have highest spearman_r for fate '{fate}'"
+            )
+
+    def test_missing_velocity_layer_raises(self):
+        from scCS.drivers import get_velocity_fate_drivers
+        adata_no_vel = self.scorer.adata_sub.copy()
+        del adata_no_vel.layers["velocity"]
+        with pytest.raises(ValueError):
+            get_velocity_fate_drivers(
+                adata_no_vel,
+                cell_scores=self.result.cell_scores,
+                fate_names=["1", "2"],
+                obs_key="leiden",
+                root="0",
+            )
+
+    def test_missing_cell_scores_raises(self):
+        with pytest.raises(ValueError):
+            self.scorer.get_velocity_fate_drivers(
+                self.result.__class__(
+                    fate_names=self.result.fate_names,
+                    M_bin=self.result.M_bin,
+                    bin_edges=self.result.bin_edges,
+                    sectors=self.result.sectors,
+                    M_sector=self.result.M_sector,
+                    n_cells_per_fate=self.result.n_cells_per_fate,
+                    commitment_vector=self.result.commitment_vector,
+                    population_entropy=self.result.population_entropy,
+                    mean_cell_entropy=self.result.mean_cell_entropy,
+                    per_fate_entropy=self.result.per_fate_entropy,
+                    pairwise_unCS=self.result.pairwise_unCS,
+                    pairwise_nCS=self.result.pairwise_nCS,
+                    cell_scores=None,  # <-- None
+                    fate_angles=self.result.fate_angles,
+                )
+            )
+
+
+# ===========================================================================
+# TestNewPlots
+# ===========================================================================
+
+class TestNewPlots:
+    """Smoke tests for new plot functions added in v0.6.1."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Build a minimal MultiConditionScorer with two conditions."""
+        import anndata as ad
+        import matplotlib
+        matplotlib.use("Agg")  # non-interactive backend for tests
+
+        rng = np.random.default_rng(99)
+        n_cells = 200
+        n_genes = 20
+
+        X = rng.poisson(2.0, (n_cells, n_genes)).astype(float)
+        leiden = np.array(["0"] * 60 + ["1"] * 70 + ["2"] * 70)
+        condition = np.array(["ctrl"] * 100 + ["treat"] * 100)
+        pseudotime = np.concatenate([
+            rng.uniform(0.0, 0.2, 60),
+            rng.uniform(0.3, 1.0, 70),
+            rng.uniform(0.3, 1.0, 70),
+        ])
+
+        adata = ad.AnnData(X=X)
+        adata.obs["leiden"] = pd.Categorical(leiden)
+        adata.obs["condition"] = pd.Categorical(condition)
+        adata.obs["velocity_pseudotime"] = pseudotime
+        adata.var_names = [f"gene_{i}" for i in range(n_genes)]
+
+        import scipy.sparse as sp
+        adata.obsp["velocity_graph"] = sp.eye(n_cells, format="csr") * 0.1
+
+        from scCS.multiconditional import MultiConditionScorer
+        mscorer = MultiConditionScorer(
+            adata, root="0", branches=["1", "2"],
+            condition_obs_key="condition", obs_key="leiden",
+        )
+        mscorer.build_embedding(ordering_metric="pseudotime", verbose=False)
+        n_sub = mscorer._scorer.adata_sub.n_obs
+        mscorer._scorer.load_velocity_vectors(
+            rng.normal(0.5, 0.3, n_sub), rng.normal(0.0, 0.2, n_sub)
+        )
+        mscorer.fit(verbose=False)
+        self.mscorer = mscorer
+        self.results = mscorer.score_all_conditions(cell_level=True, verbose=False)
+        self.delta = mscorer.compute_delta_CS(
+            "ctrl", "treat", n_bootstrap=20, verbose=False
+        )
+        yield
+        import matplotlib.pyplot as plt
+        plt.close("all")
+
+    def test_plot_rose_grid_returns_figure(self):
+        import matplotlib.figure
+        fig = self.mscorer.plot_rose_grid(self.results)
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_plot_delta_cs_heatmap_returns_figure(self):
+        import matplotlib.figure
+        fig = self.mscorer.plot_delta_cs_heatmap(self.delta)
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_plot_compare_conditions_bar_returns_figure(self):
+        import matplotlib.figure
+        fig = self.mscorer.plot_compare_conditions_bar(self.results)
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_plot_commitment_vector_radar_returns_figure(self):
+        import matplotlib.figure
+        # k=2 falls back to bar chart — should still return a Figure
+        fig = self.mscorer.plot_commitment_vector_radar(self.results)
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_standalone_plot_rose_grid(self):
+        import matplotlib.figure
+        import scCS
+        fig = scCS.plot_rose_grid(self.results)
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_standalone_plot_delta_cs_heatmap(self):
+        import matplotlib.figure
+        import scCS
+        fig = scCS.plot_delta_cs_heatmap(self.delta)
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_standalone_plot_compare_conditions_bar(self):
+        import matplotlib.figure
+        import scCS
+        fig = scCS.plot_compare_conditions_bar(self.results)
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_standalone_plot_commitment_vector_radar(self):
+        import matplotlib.figure
+        import scCS
+        fig = scCS.plot_commitment_vector_radar(self.results)
+        assert isinstance(fig, matplotlib.figure.Figure)

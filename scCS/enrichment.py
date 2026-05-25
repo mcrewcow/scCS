@@ -39,15 +39,78 @@ _DEFAULT_GENE_SETS = {
 }
 
 
+def _resolve_gene_sets(
+    gene_sets: List[str],
+    organism: str,
+) -> List[str]:
+    """Resolve gene set names, falling back to fuzzy matching if a name is stale.
+
+    Enrichr gene set names include year suffixes (e.g., ``KEGG_2021_Human``)
+    that change as the database is updated.  This helper:
+
+    1. Returns the names as-is if they appear valid (no network check).
+    2. If ``gseapy.get_library_name()`` is available, checks whether each
+       name exists in the current Enrichr library list.  If a name is not
+       found, strips the year suffix and looks for a fuzzy match.
+    3. Warns the user if a substitution was made.
+
+    Parameters
+    ----------
+    gene_sets : list of str
+    organism : str
+
+    Returns
+    -------
+    resolved : list of str
+    """
+    try:
+        import gseapy as gp
+        available = gp.get_library_name(organism=organism)
+        available_set = set(available)
+    except Exception:
+        # Can't reach Enrichr or gseapy not installed — return as-is
+        return gene_sets
+
+    resolved = []
+    for gs in gene_sets:
+        if gs in available_set:
+            resolved.append(gs)
+        else:
+            # Strip year suffix and try fuzzy match
+            import re as _re
+            base = _re.sub(r"_\d{4}(_\w+)?$", "", gs)
+            candidates = [a for a in available if a.startswith(base)]
+            if candidates:
+                best = sorted(candidates)[-1]  # pick most recent year
+                warnings.warn(
+                    f"Gene set '{gs}' not found in Enrichr library list. "
+                    f"Using '{best}' instead. "
+                    "Update _DEFAULT_GENE_SETS in enrichment.py to silence this.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                resolved.append(best)
+            else:
+                warnings.warn(
+                    f"Gene set '{gs}' not found in Enrichr library list and no "
+                    f"fuzzy match found for base '{base}'. Keeping original name.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                resolved.append(gs)
+
+    return resolved
+
+
 def run_enrichment_per_fate(
     deg_drivers: Dict[str, pd.DataFrame],
     fate_names: List[str],
     gene_sets: Optional[List[str]] = None,
     organism: str = "mouse",
-    pval_cutoff: float = 0.05,
-    logfc_cutoff: float = 0.25,
+    pval_threshold: float = 0.05,
+    logfc_threshold: float = 0.25,
     plot: bool = True,
-    n_top_terms: int = 15,
+    n_top_pathways: int = 15,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """Run Enrichr ORA on DEG driver genes for each fate arm.
 
@@ -66,13 +129,13 @@ def run_enrichment_per_fate(
         for the specified organism.
     organism : str
         'mouse' or 'human'.  Used for default gene sets and Enrichr organism.
-    pval_cutoff : float
+    pval_threshold : float
         Adjusted p-value threshold for reporting enriched terms.
-    logfc_cutoff : float
+    logfc_threshold : float
         Minimum absolute logFC used to split up/down gene lists.
     plot : bool
         If True, generate dot plots per fate per direction.
-    n_top_terms : int
+    n_top_pathways : int
         Number of top enriched terms to show in dot plots.
 
     Returns
@@ -100,6 +163,9 @@ def run_enrichment_per_fate(
             )
         gene_sets = _DEFAULT_GENE_SETS[org_key]
 
+    # Resolve gene set names — substitutes stale year-suffixed names if needed
+    gene_sets = _resolve_gene_sets(gene_sets, organism)
+
     enrichment_results: Dict[str, Dict[str, pd.DataFrame]] = {}
 
     for name in fate_names:
@@ -113,8 +179,8 @@ def run_enrichment_per_fate(
         df = deg_drivers[name]
         sig = df[df["significant"]]
 
-        up_genes = sig[sig["logfoldchange"] > logfc_cutoff]["gene"].tolist()
-        down_genes = sig[sig["logfoldchange"] < -logfc_cutoff]["gene"].tolist()
+        up_genes = sig[sig["logfoldchange"] > logfc_threshold]["gene"].tolist()
+        down_genes = sig[sig["logfoldchange"] < -logfc_threshold]["gene"].tolist()
 
         print(f"\n{'='*60}")
         print(f"  Pathway enrichment: {name}")
@@ -140,10 +206,10 @@ def run_enrichment_per_fate(
                     gene_sets=gene_sets,
                     organism=organism,
                     outdir=None,
-                    cutoff=pval_cutoff,
+                    cutoff=pval_threshold,
                 )
                 res = enr.results.copy()
-                res = res[res["Adjusted P-value"] < pval_cutoff].copy()
+                res = res[res["Adjusted P-value"] < pval_threshold].copy()
                 res = res.sort_values("Adjusted P-value").reset_index(drop=True)
                 fate_results[direction] = res
 
@@ -166,7 +232,7 @@ def run_enrichment_per_fate(
         enrichment_results[name] = fate_results
 
         if plot:
-            _plot_enrichment_dotplot(name, fate_results, n_top_terms=n_top_terms)
+            _plot_enrichment_dotplot(name, fate_results, n_top_pathways=n_top_pathways)
 
     return enrichment_results
 
@@ -178,7 +244,7 @@ def run_enrichment_per_fate(
 def _plot_enrichment_dotplot(
     fate_name: str,
     fate_results: Dict[str, pd.DataFrame],
-    n_top_terms: int = 15,
+    n_top_pathways: int = 15,
     figsize_per_panel: tuple = (10, 5),
 ) -> None:
     """Draw dot plots for up- and down-regulated enrichment results."""
@@ -194,7 +260,7 @@ def _plot_enrichment_dotplot(
         if res is None or res.empty:
             continue
 
-        plot_df = res.head(n_top_terms).copy()
+        plot_df = res.head(n_top_pathways).copy()
         plot_df["-log10(padj)"] = -np.log10(
             plot_df["Adjusted P-value"].clip(1e-300)
         )

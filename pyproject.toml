@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scCS-py"
-version = "0.5.0"
-description = "Single-cell Commitment Scores with radial star embedding for k-furcation fate decisions"
+version = "0.6.2"
+description = "Single-cell Commitment Scores with radial star embedding for k-furcation fate decisions, multi-condition analysis, and velocity-fate correlation drivers"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}

@@ -1,6 +1,212 @@
 Changelog
 =========
 
+v0.6.2 (2026-05-25)
+-------------------
+
+**Bug fixes**
+
+- **Bug 1** — ``plot_nn_entropy_elbow()`` raised ``AttributeError: 'CommitmentScorer' object
+  has no attribute 'cluster_key'``. Fixed: ``scorer.cluster_key`` → ``scorer.obs_key``
+  in ``plot.py`` (the v0.6.1 rename was not propagated to this call site).
+
+- **Bug 2** — ``score_per_subset()`` printed each subset result twice when
+  ``verbose=True``: once from the internal ``score()`` call and once from
+  ``score_per_subset`` itself. Fixed: ``score()`` is now always called with
+  ``verbose=False`` inside ``score_per_subset``; the subset header and summary
+  are printed only by ``score_per_subset``.
+
+- **Bug 3** — ``score_per_subset()`` produced ``inf`` in ``pairwise_nCS`` for
+  progenitor-only subsets (e.g., "Pre-endocrine") with no explanation.
+  This is mathematically correct (nCS is undefined when a fate arm has 0 cells),
+  but was confusing. Fixed:
+
+  - ``score_per_subset()`` now emits a ``UserWarning`` when all off-diagonal
+    nCS entries are ``inf``, explaining that the subset contains no cells from
+    any fate arm.
+  - ``CommitmentScoreResult.summary()`` now appends a footnote line when any
+    ``pairwise_nCS`` entry is ``inf``:
+    ``"(inf = fate arm has 0 cells in this subset; expected for progenitor-only subsets)"``.
+
+v0.6.1 (2026-05-24)
+-------------------
+
+**New features**
+
+- **``get_velocity_fate_drivers()``** — velocity-fate correlation driver method.
+  Computes Spearman correlation between each gene's velocity and per-cell fate
+  affinity scores (CellRank-style). Returns FDR-corrected p-values via
+  Benjamini-Hochberg. Available as ``scorer.get_velocity_fate_drivers(result)`` and
+  as standalone ``scCS.get_velocity_fate_drivers()``.
+
+- **``plot_rose_grid()``** — per-condition rose plot grid.
+  One polar subplot per condition, all panels sharing the same radial scale for
+  direct magnitude comparison. Available as ``mscorer.plot_rose_grid(results)`` and
+  as standalone ``scCS.plot_rose_grid()``.
+
+- **``plot_delta_cs_heatmap()``** — ΔCS heatmap with CI annotation.
+  Visualizes ``compute_delta_CS()`` output as a diverging heatmap annotated with
+  Δ ± CI_half per cell. Available as ``mscorer.plot_delta_cs_heatmap(delta)`` and
+  as standalone ``scCS.plot_delta_cs_heatmap()``.
+
+- **``plot_compare_conditions_bar()``** — grouped bar chart of nCS per condition.
+  One bar group per fate pair, one bar per condition, colored by ``CONDITION_PALETTE``.
+  Available as ``mscorer.plot_compare_conditions_bar(results)`` and standalone.
+
+- **``plot_commitment_vector_radar()``** — radar/spider chart of commitment vectors.
+  Each condition is one closed polygon; axes = fate names; values = commitment
+  vector (sums to 1). Falls back to bar chart for k < 3. Available as
+  ``mscorer.plot_commitment_vector_radar(results)`` and standalone.
+
+- **``CONDITION_PALETTE``** — new colorblind-safe palette for condition coloring
+  (distinct from ``FATE_PALETTE``). Used automatically in all multi-condition plots.
+
+- **``_condition_colors()``** — helper mirroring ``_fate_colors()`` but drawing from
+  ``CONDITION_PALETTE``. Used in ``plot_affinity_distributions()``,
+  ``plot_trajectory_shift()``, ``plot_rose_grid()``, and the three new plots.
+
+**API renames (hard rename — no deprecation shims)**
+
+All renames are breaking changes. Update call sites accordingly.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Old name
+     - New name
+     - Scope
+   * - ``bifurcation_cluster``
+     - ``root``
+     - All classes and functions
+   * - ``terminal_cell_types``
+     - ``branches``
+     - All classes and functions
+   * - ``cluster_key``
+     - ``obs_key``
+     - All classes and functions
+   * - ``condition_key``
+     - ``condition_obs_key``
+     - ``MultiConditionScorer``
+   * - ``sector_mode``
+     - ``sector_method``
+     - Both scorers
+   * - ``differentiation_metric``
+     - ``ordering_metric``
+     - ``build_embedding()``
+   * - ``invert_metric``
+     - ``invert_ordering``
+     - ``build_embedding()``
+   * - ``scale_metric``
+     - ``scale_ordering``
+     - ``build_embedding()``
+   * - ``n_bins`` (constructor)
+     - ``n_angle_bins``
+     - Both scorers
+   * - ``pval_cutoff``
+     - ``pval_threshold``
+     - drivers, enrichment, ``compare_conditions()``
+   * - ``logfc_cutoff``
+     - ``logfc_threshold``
+     - drivers, enrichment
+   * - ``n_top``
+     - ``n_top_genes``
+     - ``get_velocity_drivers()``, ``get_deg_drivers()``
+   * - ``n_top_terms``
+     - ``n_top_pathways``
+     - enrichment functions
+   * - ``compute_cell_level``
+     - ``cell_level``
+     - ``score()``, ``score_all_conditions()``
+   * - ``subset_key``
+     - ``split_by``
+     - ``score_per_subset()``
+   * - ``pseudotime_col``
+     - ``pseudotime_key``
+     - ``trajectory_shift()``, ``plot_trajectory_shift()``
+   * - ``sample_key``
+     - ``replicate_key``
+     - ``fit_mixed_model()``
+   * - ``reference_condition``
+     - ``ref_condition``
+     - ``fit_mixed_model()``
+   * - ``reference_fate``
+     - ``ref_fate``
+     - ``plot_commitment_bar()``, ``plot_subset_comparison()``
+   * - ``sccs_arm_name`` (obs col)
+     - ``sccs_branch``
+     - ``embedding.py``, ``plot.py``
+   * - ``velocity_pseudotime_sub`` (obs col)
+     - ``sccs_pseudotime``
+     - multiple files
+   * - ``uns["sccs"]["bifurcation_cluster"]``
+     - ``uns["sccs"]["root"]``
+     - multiple files
+   * - ``FateMap.bifurcation_cluster``
+     - ``FateMap.root``
+     - ``bifurcation.py``
+   * - ``FateMap.cluster_key``
+     - ``FateMap.obs_key``
+     - ``bifurcation.py``
+   * - ``rebuild_embedding_with_subset_pseudotime()``
+     - ``refit_pseudotime()``
+     - Both scorers
+   * - ``recompute_subset_pseudotime()``
+     - ``compute_local_pseudotime()``
+     - ``CommitmentScorer``
+   * - ``plot_condition_comparison()``
+     - ``plot_affinity_distributions()``
+     - ``MultiConditionScorer``
+   * - ``plot_condition_star()``
+     - ``plot_star_grid()``
+     - ``MultiConditionScorer``
+
+**Removed**
+
+- ``MultiConditionScorer.score_per_condition()`` — was a thin alias for
+  ``score_all_conditions()``. Use ``score_all_conditions()`` directly.
+
+**Bug fixes**
+
+- **Bug E** — ``plot_affinity_distributions()`` and ``plot_trajectory_shift()`` now
+  use ``CONDITION_PALETTE`` for condition colors instead of ``FATE_PALETTE``.
+- **Bug F** — ``plot_expression_trends()`` error message now correctly references
+  ``compute_local_pseudotime()`` (was ``recompute_subset_pseudotime()``).
+
+v0.6.0 (2026-05-23)
+-------------------
+
+**Bug fixes (13 total)**
+
+- **Fix #1** — ``plot_nn_entropy_elbow`` docstring: removed false prerequisite
+  claiming ``score()`` must be called before the elbow plot.
+- **Fix #2** — ``write_to_obs=False`` in ``score()``, ``score_per_subset()``,
+  ``score_all_conditions()``: prevents obs column clobbering when called in loops.
+- **Fix #3** — f-string bug in ``compare_conditions()`` verbose path: condition
+  label was not interpolated correctly in the "no significant differences" message.
+- **Fix #4** — Removed dead ``PROGENITOR_COLOR`` import in ``multiconditional.py``
+  (was imported but never used, causing a linting warning).
+- **Fix #5** — ``try/except/finally`` in ``embedding.py`` Strategy 1 cleanup:
+  ensures temporary obs columns are removed even if an exception is raised.
+- **Fix #6** — ``_needs_refit`` flag + improved ``_check_fitted()`` error message:
+  raises a clear error if ``score()`` is called after ``refit_pseudotime()`` without
+  calling ``fit()`` again.
+- **Fix #7** — ``pct_fate`` / ``pct_progenitor`` columns from ``pts`` in
+  ``get_deg_drivers()``: correctly extracts percent-expressed values from scanpy's
+  ``rank_genes_groups`` output.
+- **Fix #8** — ``__repr__`` on ``CommitmentScorer`` and ``MultiConditionScorer``:
+  now shows root, branches, conditions, and status.
+- **Fix #9** — ``statsmodels`` ImportError guard in ``plot_expression_trends()``:
+  raises a clear error with install instructions when statsmodels is absent.
+- **Fix #10** — ``save()`` / ``load()`` serialization on ``CommitmentScorer``:
+  correctly round-trips all scorer state including ``_needs_refit``.
+- **Fix #11** — Stratified ``bootstrap_cs()``: added ``stratified=`` and
+  ``fate_cell_indices=`` parameters for stratified resampling within fate arms.
+- **Fix #12** — ``_resolve_gene_sets()`` fuzzy year-suffix matching in
+  ``enrichment.py``: handles Enrichr library names with year suffixes
+  (e.g., ``KEGG_2021_Human`` vs ``KEGG_2019_Mouse``).
+- **Fix #13** — ``TestMultiConditionScorer`` test class: 26 tests covering all
+  ``MultiConditionScorer`` methods, bringing the total to 130 passing tests.
+
 v0.5.0 (2026-03-27)
 --------------------
 

@@ -5,8 +5,8 @@ In scCS, the bifurcation point is explicitly defined by the user as a
 single cluster (e.g., leiden cluster '17').  There is no automatic
 fate detection — the user supplies:
 
-    bifurcation_cluster  : the progenitor/root cluster label
-    terminal_cell_types  : list of terminal fate cluster labels
+    root  : the progenitor/root cluster label
+    branches  : list of terminal fate cluster labels
 
 This module builds a standardized FateMap from those labels, computing
 centroids in the scCS star embedding space (X_sccs) and collecting
@@ -34,7 +34,7 @@ class FateMap:
 
     Attributes
     ----------
-    bifurcation_cluster : str
+    root : str
         Label of the progenitor/root cluster supplied by the user.
     fate_names : list of str
         Human-readable labels for each terminal fate (length k).
@@ -49,19 +49,19 @@ class FateMap:
         Per-fate arrays of cell indices.
     arm_angles_deg : np.ndarray, shape (k,)
         Angle (degrees) of each fate's radial arm in the star embedding.
-    cluster_key : str
+    obs_key : str
         The obs column used for cluster labels.
     k : int
         Number of fates (read-only property).
     """
-    bifurcation_cluster: str
+    root: str
     fate_names: List[str]
     fate_centroids: np.ndarray
     root_centroid: np.ndarray
     root_cells: np.ndarray
     fate_cell_indices: List[np.ndarray]
     arm_angles_deg: np.ndarray
-    cluster_key: str
+    obs_key: str
 
     @property
     def k(self) -> int:
@@ -69,8 +69,8 @@ class FateMap:
 
     def summary(self) -> str:
         lines = [
-            f"FateMap  (bifurcation_cluster='{self.bifurcation_cluster}', k={self.k})",
-            f"  Cluster key : '{self.cluster_key}'",
+            f"FateMap  (root='{self.root}', k={self.k})",
+            f"  Cluster key : '{self.obs_key}'",
             f"  Root cells  : {len(self.root_cells)}",
             f"  Root centroid: ({self.root_centroid[0]:.3f}, {self.root_centroid[1]:.3f})",
         ]
@@ -91,9 +91,9 @@ class FateMap:
 
 def build_fate_map(
     adata,
-    bifurcation_cluster: str,
-    terminal_cell_types: List[str],
-    cluster_key: str = "leiden",
+    root: str,
+    branches: List[str],
+    obs_key: str = "leiden",
     verbose: bool = True,
 ) -> FateMap:
     """Build a FateMap from user-supplied cluster labels.
@@ -105,13 +105,13 @@ def build_fate_map(
     ----------
     adata : AnnData
         Must have X_sccs in obsm (built by build_star_embedding).
-    bifurcation_cluster : str
-        Label of the progenitor cluster in adata.obs[cluster_key].
+    root : str
+        Label of the progenitor cluster in adata.obs[obs_key].
         Example: '17'  (leiden cluster 17)
-    terminal_cell_types : list of str
+    branches : list of str
         Labels of the k terminal fate clusters.
         Example: ['Monocyte', 'DC', 'Neutrophil']
-    cluster_key : str
+    obs_key : str
         Column in adata.obs with cluster labels.
     verbose : bool
 
@@ -125,16 +125,16 @@ def build_fate_map(
             "Run CommitmentScorer.build_embedding() before build_fate_map()."
         )
 
-    obs_labels = adata.obs[cluster_key].astype(str).values
+    obs_labels = adata.obs[obs_key].astype(str).values
     embedding = np.array(adata.obsm["X_sccs"])
 
     # --- Validate bifurcation cluster ---
-    bif_mask = obs_labels == str(bifurcation_cluster)
+    bif_mask = obs_labels == str(root)
     if bif_mask.sum() == 0:
         available = sorted(set(obs_labels))
         raise ValueError(
-            f"Bifurcation cluster '{bifurcation_cluster}' not found in "
-            f"adata.obs['{cluster_key}']. "
+            f"Root cluster '{root}' not found in "
+            f"adata.obs['{obs_key}']. "
             f"Available labels: {available}"
         )
     root_cells = np.where(bif_mask)[0]
@@ -142,7 +142,7 @@ def build_fate_map(
 
     if verbose:
         print(
-            f"[scCS] Bifurcation cluster '{bifurcation_cluster}': "
+            f"[scCS] Root cluster '{root}': "
             f"{len(root_cells)} cells, "
             f"centroid=({root_centroid[0]:.2f}, {root_centroid[1]:.2f})"
         )
@@ -153,12 +153,12 @@ def build_fate_map(
     fate_cell_indices = []
     skipped = []
 
-    for name in terminal_cell_types:
+    for name in branches:
         mask = obs_labels == str(name)
         n = mask.sum()
         if n == 0:
             warnings.warn(
-                f"Terminal fate '{name}' not found in adata.obs['{cluster_key}']. "
+                f"Terminal fate '{name}' not found in adata.obs['{obs_key}']. "
                 "Skipping.",
                 stacklevel=2,
             )
@@ -200,24 +200,22 @@ def build_fate_map(
             if name in fate_to_angle:
                 arm_angles_deg[j] = fate_to_angle[name]
             else:
-                # Compute from centroid direction
                 delta = fate_centroids[j] - root_centroid
                 arm_angles_deg[j] = np.degrees(np.arctan2(delta[1], delta[0])) % 360.0
     else:
-        # Compute from centroid directions
         for j in range(len(fate_names)):
             delta = fate_centroids[j] - root_centroid
             arm_angles_deg[j] = np.degrees(np.arctan2(delta[1], delta[0])) % 360.0
 
     fate_map = FateMap(
-        bifurcation_cluster=str(bifurcation_cluster),
+        root=str(root),
         fate_names=fate_names,
         fate_centroids=fate_centroids,
         root_centroid=root_centroid,
         root_cells=root_cells,
         fate_cell_indices=fate_cell_indices,
         arm_angles_deg=arm_angles_deg,
-        cluster_key=cluster_key,
+        obs_key=obs_key,
     )
 
     if verbose:

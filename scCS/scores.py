@@ -655,6 +655,8 @@ def bootstrap_cs(
     ci: float = 0.95,
     seed: int = 42,
     normalized: bool = True,
+    stratified: bool = False,
+    fate_cell_indices: Optional[Sequence] = None,
 ) -> Dict:
     """Bootstrap confidence intervals for pairwise commitment scores.
 
@@ -679,6 +681,15 @@ def bootstrap_cs(
     seed : int
     normalized : bool
         If True, return CI for nCS; if False, for unCS.
+    stratified : bool
+        If True, resample cells within each fate arm separately (preserving
+        arm cell counts), then concatenate.  Prevents bootstrap replicates
+        with very few cells in one arm.  Requires ``fate_cell_indices``.
+        Default False (uniform resampling, original behavior).
+    fate_cell_indices : sequence of array-like, optional
+        List of k arrays, each containing the integer indices of cells
+        belonging to that fate arm.  Required when ``stratified=True``.
+        Typically ``fate_map.fate_cell_indices``.
 
     Returns
     -------
@@ -697,8 +708,34 @@ def bootstrap_cs(
 
     boot_matrices = np.zeros((n_bootstrap, k, k), dtype=float)
 
+    if stratified and fate_cell_indices is not None:
+        # Validate: all indices must be within [0, n_cells)
+        for arm_idx in fate_cell_indices:
+            arm_arr = np.asarray(arm_idx)
+            if len(arm_arr) == 0:
+                raise ValueError(
+                    "stratified=True requires non-empty fate_cell_indices for each arm."
+                )
+    elif stratified:
+        warnings.warn(
+            "stratified=True requires fate_cell_indices. "
+            "Falling back to uniform resampling.",
+            stacklevel=2,
+        )
+
     for b in range(n_bootstrap):
-        idx = rng.integers(0, n_cells, size=n_cells)
+        if stratified and fate_cell_indices is not None:
+            # Resample within each fate arm separately, then concatenate
+            boot_idx_parts = []
+            for arm_idx in fate_cell_indices:
+                arm_arr = np.asarray(arm_idx)
+                boot_idx_parts.append(
+                    rng.choice(arm_arr, size=len(arm_arr), replace=True)
+                )
+            idx = np.concatenate(boot_idx_parts)
+        else:
+            idx = rng.integers(0, n_cells, size=n_cells)
+
         vx_b, vy_b = vx[idx], vy[idx]
 
         mag_b = compute_magnitudes(vx_b, vy_b)
@@ -866,6 +903,14 @@ class CommitmentScoreResult:
         lines += ["", "  Pairwise nCS matrix:"]
         df = self.pairwise_to_dataframe(normalized=True)
         lines.append(df.to_string())
+        # Footnote when any off-diagonal entry is inf
+        k = len(self.fate_names)
+        off_diag_vals = [self.pairwise_nCS[i, j] for i in range(k) for j in range(k) if i != j]
+        if off_diag_vals and any(np.isinf(v) for v in off_diag_vals):
+            lines.append(
+                "  (inf = fate arm has 0 cells in this subset; "
+                "expected for progenitor-only subsets)"
+            )
         if self.bootstrap_ci is not None:
             ci_lvl = int(self.bootstrap_ci.get("ci_level", 0.95) * 100)
             n_boot = self.bootstrap_ci.get("n_bootstrap", "?")

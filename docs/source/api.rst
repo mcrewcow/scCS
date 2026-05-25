@@ -56,6 +56,8 @@ Plotting Functions
 All plotting functions accept a ``color_map`` dict (fate name → hex color)
 to preserve your original scanpy/Seurat cluster colors.
 
+Single-condition plots:
+
 .. autofunction:: scCS.plot_star_embedding
 .. autofunction:: scCS.plot_star_panels
 .. autofunction:: scCS.plot_commitment_bar
@@ -66,17 +68,39 @@ to preserve your original scanpy/Seurat cluster colors.
 .. autofunction:: scCS.plot_subset_comparison
 .. autofunction:: scCS.plot_nn_entropy_elbow
 
+Multi-condition plots:
+
+.. autofunction:: scCS.plot_rose_grid
+.. autofunction:: scCS.plot_delta_cs_heatmap
+.. autofunction:: scCS.plot_compare_conditions_bar
+.. autofunction:: scCS.plot_commitment_vector_radar
+
 Embedding
 ---------
 
 .. autofunction:: scCS.build_star_embedding
-.. autofunction:: scCS.recompute_subset_pseudotime
+.. autofunction:: scCS.compute_local_pseudotime
 .. autofunction:: scCS.scale_metric_01
 
 Fate Detection
 --------------
 
 .. autofunction:: scCS.build_fate_map
+
+Driver Genes
+------------
+
+Three complementary approaches to identify fate-driving genes:
+
+.. autofunction:: scCS.get_velocity_drivers
+.. autofunction:: scCS.get_deg_drivers
+.. autofunction:: scCS.get_velocity_fate_drivers
+
+Pathway Enrichment
+------------------
+
+.. autofunction:: scCS.run_enrichment_per_fate
+.. autofunction:: scCS.export_enrichment_tables
 
 Core Math — Entropy
 -------------------

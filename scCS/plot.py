@@ -62,6 +62,18 @@ FATE_PALETTE = [
 
 PROGENITOR_COLOR = "#AAAAAA"  # neutral grey for bifurcation cluster
 
+# Condition colors — distinct from fate colors, also colorblind-safe (Wong 2011 reordered)
+CONDITION_PALETTE = [
+    "#E69F00",  # orange
+    "#56B4E9",  # sky blue
+    "#009E73",  # green
+    "#F0E442",  # yellow
+    "#0072B2",  # blue
+    "#D55E00",  # vermillion
+    "#CC79A7",  # pink
+    "#000000",  # black
+]
+
 
 def _fate_colors(
     fate_names: List[str],
@@ -80,6 +92,27 @@ def _fate_colors(
             out[name] = color_map[name]
         else:
             out[name] = FATE_PALETTE[palette_idx % len(FATE_PALETTE)]
+            palette_idx += 1
+    return out
+
+
+def _condition_colors(
+    condition_names: List[str],
+    color_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """Return a color dict for condition_names.
+
+    Draws from CONDITION_PALETTE (distinct from FATE_PALETTE).
+    If color_map is provided, use it for any condition names it contains
+    and fall back to CONDITION_PALETTE for the rest.
+    """
+    out = {}
+    palette_idx = 0
+    for name in condition_names:
+        if color_map and name in color_map:
+            out[name] = color_map[name]
+        else:
+            out[name] = CONDITION_PALETTE[palette_idx % len(CONDITION_PALETTE)]
             palette_idx += 1
     return out
 
@@ -216,7 +249,7 @@ def plot_star_embedding(
     ax.set_xlabel("scCS dim 1", fontsize=10)
     ax.set_ylabel("scCS dim 2", fontsize=10)
     ax.set_title(
-        title or f"scCS Star Embedding  (bifurcation: cluster '{sccs_meta.get('bifurcation_cluster', '?')}')",
+        title or f"scCS Star Embedding  (bifurcation: cluster '{sccs_meta.get('root', '?')}')",
         fontsize=11,
     )
     sns.despine(ax=ax)
@@ -251,8 +284,8 @@ def plot_nn_entropy_elbow(
     ----------
     scorer : CommitmentScorer
         A fitted scorer with ``build_embedding()`` and ``fit()`` already called.
-        ``score(compute_cell_level=True)`` must have been called at least once
-        so that ``cell_scores`` are available.
+        No prior ``score()`` call is needed — cell scores are recomputed
+        internally from the velocity vectors.
     k_nn_range : list or range
         k_nn values to sweep.  Default: 5, 10, 15, ..., 50.
     color_map : dict, optional
@@ -272,7 +305,7 @@ def plot_nn_entropy_elbow(
     >>> scorer.build_embedding(differentiation_metric='pseudotime')
     >>> scorer.fit()
     >>> result = scorer.score(compute_cell_level=True)
-    >>> fig = scorer.plot_nn_entropy_elbow(result)
+    >>> fig = scorer.plot_nn_entropy_elbow()
     """
     from .scores import compute_nn_cell_entropy, compute_cell_scores
 
@@ -294,7 +327,7 @@ def plot_nn_entropy_elbow(
     )
 
     # Fate arm membership for per-fate means
-    cluster_labels = scorer.adata_sub.obs[scorer.cluster_key].astype(str).values
+    cluster_labels = scorer.adata_sub.obs[scorer.obs_key].astype(str).values
     fate_masks = {
         name: cluster_labels == name
         for name in fate_names
@@ -390,7 +423,7 @@ def plot_expression_trends(
         - ``'affinity'``       : per-cell fate affinity score for ``fate``
                                  (0 → 1, from compute_cell_scores).
         - ``'pseudotime'``     : velocity_pseudotime from adata.obs
-                                 (or velocity_pseudotime_sub if available).
+                                 (or sccs_pseudotime if available via compute_local_pseudotime()).
         - ``'radial_distance'``: Euclidean distance from origin in X_sccs
                                  (arm position, 0 = progenitor, arm_scale = tip).
         Default: ``'affinity'``.
@@ -414,7 +447,16 @@ def plot_expression_trends(
     fig : matplotlib Figure
     """
     import scipy.sparse as sp
-    from statsmodels.nonparametric.smoothers_lowess import lowess
+    try:
+        from statsmodels.nonparametric.smoothers_lowess import lowess
+    except ImportError:
+        if smooth:
+            raise ImportError(
+                "statsmodels is required for LOWESS smoothing in plot_expression_trends. "
+                "Install it with:  pip install statsmodels  "
+                "or pass smooth=False to disable smoothing."
+            ) from None
+        lowess = None
 
     if result.cell_scores is None:
         raise ValueError(
@@ -456,14 +498,14 @@ def plot_expression_trends(
     elif x_axis == "pseudotime":
         # Prefer subset-local pseudotime if available
         pt_col = (
-            "velocity_pseudotime_sub"
-            if "velocity_pseudotime_sub" in adata_sub.obs
+            "sccs_pseudotime"
+            if "sccs_pseudotime" in adata_sub.obs
             else "velocity_pseudotime"
         )
         if pt_col not in adata_sub.obs:
             raise ValueError(
                 f"'{pt_col}' not found in adata.obs. "
-                "Run scorer.recompute_subset_pseudotime() or scvelo.tl.velocity_pseudotime()."
+                "Run scorer.compute_local_pseudotime() or scvelo.tl.velocity_pseudotime()."
             )
         x_vals = np.array(adata_sub.obs[pt_col], dtype=float)
         x_label = "Pseudotime"
@@ -569,11 +611,11 @@ def _scatter_cells(
 ):
     """Internal: scatter cells with the requested coloring scheme."""
     sccs_meta = adata.uns.get("sccs", {})
-    bif_cluster = sccs_meta.get("bifurcation_cluster", None)
+    bif_cluster = sccs_meta.get("root", None)
 
     if color_by == "fate":
         # Color by arm assignment (categorical)
-        arm_names = adata.obs.get("sccs_arm_name", None)
+        arm_names = adata.obs.get("sccs_branch", None)
         if arm_names is not None:
             arm_names = arm_names.astype(str).values
             # Bifurcation cluster
@@ -842,6 +884,126 @@ def plot_rose(
     return fig
 
 
+
+# ---------------------------------------------------------------------------
+# 3b. Per-condition rose grid
+# ---------------------------------------------------------------------------
+
+def plot_rose_grid(
+    results: Dict[str, "CommitmentScoreResult"],
+    color_map: Optional[Dict[str, str]] = None,
+    figsize_per_panel: Tuple[float, float] = (5, 5),
+    title: Optional[str] = None,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Grid of polar rose plots — one per condition.
+
+    All panels share the same radial scale (max of all M_bin.max() across
+    conditions), making magnitudes directly comparable.  Fate sectors are
+    shaded with FATE_PALETTE colors (consistent with single-condition
+    plot_rose).
+
+    Parameters
+    ----------
+    results : dict
+        Mapping of condition_label -> CommitmentScoreResult
+        (output of MultiConditionScorer.score_all_conditions()).
+    color_map : dict, optional
+        fate_name -> hex color.  Falls back to FATE_PALETTE.
+    figsize_per_panel : tuple
+        Size of each polar subplot.
+    title : str, optional
+        Overall figure title.
+    save_path : str, optional
+
+    Returns
+    -------
+    fig : matplotlib Figure
+    """
+    sns.set_theme(style="ticks")
+
+    conditions = list(results.keys())
+    n = len(conditions)
+    if n == 0:
+        raise ValueError("results dict is empty.")
+
+    # Shared radial scale
+    r_max = max(res.M_bin.max() for res in results.values())
+    r_max = r_max * 1.15 if r_max > 0 else 1.0
+
+    # Use fate_names from first result
+    fate_names = list(results.values())[0].fate_names
+    colors = _fate_colors(fate_names, color_map)
+
+    fig = plt.figure(figsize=(figsize_per_panel[0] * n, figsize_per_panel[1]))
+
+    for idx, cond in enumerate(conditions):
+        res = results[cond]
+        ax = fig.add_subplot(1, n, idx + 1, projection="polar")
+
+        n_bins = len(res.M_bin)
+        bin_width = 2 * np.pi / n_bins
+        bin_centers = np.linspace(0, 2 * np.pi, n_bins, endpoint=False) + bin_width / 2
+
+        bin_colors = ["#cccccc"] * n_bins
+        for j, (name, sector_bins) in enumerate(zip(res.fate_names, res.sectors)):
+            for b in sector_bins:
+                bin_colors[b] = colors[name]
+
+        ax.bar(
+            bin_centers,
+            res.M_bin,
+            width=bin_width * 0.9,
+            color=bin_colors,
+            alpha=0.85,
+            edgecolor="white",
+            linewidth=0.5,
+        )
+
+        # Fate arm labels
+        if res.fate_angles is not None:
+            for j, (name, angle) in enumerate(zip(res.fate_names, res.fate_angles)):
+                angle_rad = np.radians(angle)
+                ax.annotate(
+                    name,
+                    xy=(angle_rad, r_max),
+                    ha="center", va="center",
+                    fontsize=9, fontweight="bold",
+                    color=colors[name],
+                )
+
+        ax.set_ylim(0, r_max)
+        ax.set_title(cond, pad=15, fontsize=11, fontweight="bold")
+        ax.set_theta_zero_location("E")
+        ax.set_theta_direction(1)
+        ax.grid(True, alpha=0.3)
+
+    # Shared legend (first panel's fate names)
+    import matplotlib.patches as mpatches
+    patches = [
+        mpatches.Patch(color=colors[name], label=name)
+        for name in fate_names
+    ]
+    fig.legend(
+        handles=patches,
+        loc="lower center",
+        ncol=min(len(fate_names), 4),
+        fontsize=9,
+        frameon=False,
+        bbox_to_anchor=(0.5, -0.05),
+    )
+
+    if title:
+        fig.suptitle(title, fontsize=13, y=1.02)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # 4. Pairwise CS heatmap
 # ---------------------------------------------------------------------------
@@ -919,7 +1081,7 @@ def plot_pairwise_cs(
 
 def plot_commitment_bar(
     result: CommitmentScoreResult,
-    reference_fate: Optional[str] = None,
+    ref_fate: Optional[str] = None,
     mode: str = "auto",
     color_map: Optional[Dict[str, str]] = None,
     title: Optional[str] = None,
@@ -938,7 +1100,7 @@ def plot_commitment_bar(
     Parameters
     ----------
     result : CommitmentScoreResult
-    reference_fate : str, optional
+    ref_fate : str, optional
         If given, produce only a single subplot using this fate as reference.
         Useful when you want a focused comparison.
     mode : str
@@ -959,13 +1121,13 @@ def plot_commitment_bar(
     sns.set_theme(style="ticks")
 
     # Decide which reference fates to show
-    if reference_fate is not None:
-        if reference_fate not in result.fate_names:
+    if ref_fate is not None:
+        if ref_fate not in result.fate_names:
             raise ValueError(
-                f"reference_fate '{reference_fate}' not in fate_names: "
+                f"ref_fate '{ref_fate}' not in fate_names: "
                 f"{result.fate_names}"
             )
-        ref_indices = [result.fate_names.index(reference_fate)]
+        ref_indices = [result.fate_names.index(ref_fate)]
     else:
         ref_indices = list(range(result.k))
 
@@ -1122,7 +1284,7 @@ def plot_commitment_heatmap(
 
 def plot_subset_comparison(
     subset_results: dict,
-    reference_fate: Optional[str] = None,
+    ref_fate: Optional[str] = None,
     normalized: bool = True,
     title: str = "Commitment Score by Subset",
     figsize: Tuple[float, float] = (8, 4),
@@ -1135,7 +1297,7 @@ def plot_subset_comparison(
     subset_results : dict
         Mapping of subset_name -> CommitmentScoreResult
         (from CommitmentScorer.score_per_subset()).
-    reference_fate : str, optional
+    ref_fate : str, optional
     normalized : bool
     title : str
     figsize : tuple
@@ -1149,10 +1311,10 @@ def plot_subset_comparison(
 
     rows = []
     for subset_name, result in subset_results.items():
-        if reference_fate is None:
+        if ref_fate is None:
             ref_idx = int(np.argmin(result.M_sector))
         else:
-            ref_idx = result.fate_names.index(reference_fate)
+            ref_idx = result.fate_names.index(ref_fate)
 
         for j, fate_name in enumerate(result.fate_names):
             if j == ref_idx:
@@ -1193,6 +1355,330 @@ def plot_subset_comparison(
     ax.set_title(title)
     ax.legend(frameon=False)
     sns.despine(ax=ax)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 9. ΔCS heatmap with CI annotation
+# ---------------------------------------------------------------------------
+
+def plot_delta_cs_heatmap(
+    delta_result: dict,
+    title: Optional[str] = None,
+    figsize: Optional[Tuple[float, float]] = None,
+    cmap: str = "RdBu_r",
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Heatmap of ΔCS = nCS_A − nCS_B with CI annotation.
+
+    Entry [i, j] = nCS_A(i÷j) − nCS_B(i÷j).  Positive values (red) mean
+    condition A has stronger commitment of fate i relative to fate j.
+    Cells are annotated with Δ ± CI_half.
+
+    Parameters
+    ----------
+    delta_result : dict
+        Output of MultiConditionScorer.compute_delta_CS().
+    title : str, optional
+    figsize : tuple, optional
+    cmap : str
+        Diverging colormap.  Default: 'RdBu_r'.
+    save_path : str, optional
+
+    Returns
+    -------
+    fig : matplotlib Figure
+    """
+    import pandas as pd
+
+    delta = delta_result["delta_nCS"]
+    ci_low = delta_result["ci_low"]
+    ci_high = delta_result["ci_high"]
+    fate_names = delta_result["fate_names"]
+    cond_a = delta_result["condition_a"]
+    cond_b = delta_result["condition_b"]
+
+    k = len(fate_names)
+    if figsize is None:
+        figsize = (max(4, k * 1.5), max(3.5, k * 1.3))
+
+    # CI half-width for annotation
+    ci_half = (ci_high - ci_low) / 2.0
+
+    # Build annotation matrix
+    annot = np.empty((k, k), dtype=object)
+    for i in range(k):
+        for j in range(k):
+            d = delta[i, j]
+            h = ci_half[i, j]
+            if np.isfinite(d) and np.isfinite(h):
+                annot[i, j] = f"{d:+.2f}" + "\n" + f"±{h:.2f}"
+            elif np.isfinite(d):
+                annot[i, j] = f"{d:+.2f}"
+            else:
+                annot[i, j] = "—"
+
+    df = pd.DataFrame(delta, index=fate_names, columns=fate_names)
+
+    finite_vals = delta[np.isfinite(delta)]
+    vmax = np.abs(finite_vals).max() if len(finite_vals) > 0 else 1.0
+
+    sns.set_theme(style="ticks")
+    fig, ax = plt.subplots(figsize=figsize)
+
+    sns.heatmap(
+        df, ax=ax,
+        cmap=cmap, center=0, vmin=-vmax, vmax=vmax,
+        annot=annot, fmt="",
+        linewidths=0.5,
+        cbar_kws={"label": "ΔnCS", "shrink": 0.8},
+        annot_kws={"size": 9},
+    )
+
+    ax.set_title(
+        title or f"ΔCS: '{cond_a}' − '{cond_b}'",
+        fontsize=11,
+    )
+    ax.set_xlabel(f"Reference fate (÷)")
+    ax.set_ylabel(f"Query fate (×)")
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 10. Grouped bar chart of nCS per condition
+# ---------------------------------------------------------------------------
+
+def plot_compare_conditions_bar(
+    results: Dict[str, "CommitmentScoreResult"],
+    ref_fate: Optional[str] = None,
+    color_map: Optional[Dict[str, str]] = None,
+    title: Optional[str] = None,
+    figsize: Optional[Tuple[float, float]] = None,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Grouped bar chart of nCS per condition.
+
+    For each fate pair (query ÷ reference), one group of bars — one bar per
+    condition, colored by CONDITION_PALETTE.  A horizontal dashed line at
+    CS = 1 marks the neutral point.
+
+    Parameters
+    ----------
+    results : dict
+        Mapping of condition_label -> CommitmentScoreResult
+        (output of MultiConditionScorer.score_all_conditions()).
+    ref_fate : str, optional
+        Reference fate for the denominator.  If None, uses the fate with
+        the lowest mean M_sector across conditions.
+    color_map : dict, optional
+        condition_label -> hex color.  Falls back to CONDITION_PALETTE.
+    title : str, optional
+    figsize : tuple, optional
+    save_path : str, optional
+
+    Returns
+    -------
+    fig : matplotlib Figure
+    """
+    import pandas as pd
+
+    conditions = list(results.keys())
+    fate_names = list(results.values())[0].fate_names
+    k = len(fate_names)
+
+    # Resolve reference fate
+    if ref_fate is None:
+        mean_m = np.array([
+            np.mean([results[c].M_sector[j] for c in conditions])
+            for j in range(k)
+        ])
+        ref_idx = int(np.argmin(mean_m))
+        ref_fate = fate_names[ref_idx]
+    else:
+        if ref_fate not in fate_names:
+            raise ValueError(f"ref_fate '{ref_fate}' not in fate_names: {fate_names}")
+        ref_idx = fate_names.index(ref_fate)
+
+    query_names = [n for i, n in enumerate(fate_names) if i != ref_idx]
+    query_idx = [i for i in range(k) if i != ref_idx]
+
+    # Condition colors
+    cond_colors = _condition_colors(conditions, color_map)
+
+    # Build data
+    rows = []
+    for cond in conditions:
+        res = results[cond]
+        for qi, qname in zip(query_idx, query_names):
+            rows.append({
+                "condition": cond,
+                "fate_pair": f"{qname} ÷ {ref_fate}",
+                "nCS": res.pairwise_nCS[qi, ref_idx],
+            })
+    df = pd.DataFrame(rows)
+
+    fate_pairs = df["fate_pair"].unique().tolist()
+    n_pairs = len(fate_pairs)
+    n_conds = len(conditions)
+
+    if figsize is None:
+        figsize = (max(5, n_pairs * n_conds * 0.8), 4.5)
+
+    sns.set_theme(style="ticks")
+    fig, ax = plt.subplots(figsize=figsize)
+
+    x = np.arange(n_pairs)
+    width = 0.8 / n_conds
+
+    for ci, cond in enumerate(conditions):
+        sub = df[df["condition"] == cond]
+        vals = [sub[sub["fate_pair"] == fp]["nCS"].values[0]
+                if len(sub[sub["fate_pair"] == fp]) > 0 else np.nan
+                for fp in fate_pairs]
+        offset = (ci - n_conds / 2 + 0.5) * width
+        bars = ax.bar(
+            x + offset, vals, width * 0.9,
+            color=cond_colors[cond], alpha=0.85,
+            label=cond, edgecolor="white", linewidth=0.5,
+        )
+        # Value labels
+        for bar, v in zip(bars, vals):
+            if np.isfinite(v):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + 0.02,
+                    f"{v:.2f}",
+                    ha="center", va="bottom", fontsize=7.5,
+                )
+
+    ax.axhline(1.0, color="black", linestyle="--", linewidth=1.0, alpha=0.45, label="CS = 1")
+    ax.set_xticks(x)
+    ax.set_xticklabels(fate_pairs, rotation=15, ha="right")
+    ax.set_ylabel("nCS")
+    ax.set_title(title or f"nCS by condition  (÷ '{ref_fate}')", fontsize=11)
+    ax.legend(frameon=False, fontsize=9)
+    sns.despine(ax=ax)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 11. Radar / spider chart of commitment vectors
+# ---------------------------------------------------------------------------
+
+def plot_commitment_vector_radar(
+    results: Dict[str, "CommitmentScoreResult"],
+    color_map: Optional[Dict[str, str]] = None,
+    title: Optional[str] = None,
+    figsize: Tuple[float, float] = (6, 6),
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Radar / spider chart of commitment vectors per condition.
+
+    Each condition is one closed polygon.  Axes = fate names (k spokes).
+    Values = commitment_vector (sums to 1).  Conditions colored by
+    CONDITION_PALETTE.
+
+    For k < 3, falls back to a grouped bar chart with a warning.
+
+    Parameters
+    ----------
+    results : dict
+        Mapping of condition_label -> CommitmentScoreResult
+        (output of MultiConditionScorer.score_all_conditions()).
+    color_map : dict, optional
+        condition_label -> hex color.  Falls back to CONDITION_PALETTE.
+    title : str, optional
+    figsize : tuple
+    save_path : str, optional
+
+    Returns
+    -------
+    fig : matplotlib Figure
+    """
+    import matplotlib.patches as mpatches
+
+    conditions = list(results.keys())
+    fate_names = list(results.values())[0].fate_names
+    k = len(fate_names)
+
+    cond_colors = _condition_colors(conditions, color_map)
+
+    if k < 3:
+        warnings.warn(
+            f"k={k} fates — radar chart requires k≥3. Falling back to bar chart.",
+            stacklevel=2,
+        )
+        # Simple bar chart fallback
+        sns.set_theme(style="ticks")
+        fig, ax = plt.subplots(figsize=figsize)
+        x = np.arange(k)
+        width = 0.8 / len(conditions)
+        for ci, cond in enumerate(conditions):
+            cv = results[cond].commitment_vector
+            offset = (ci - len(conditions) / 2 + 0.5) * width
+            ax.bar(x + offset, cv, width * 0.9,
+                   color=cond_colors[cond], alpha=0.85, label=cond)
+        ax.set_xticks(x)
+        ax.set_xticklabels(fate_names)
+        ax.set_ylabel("Commitment weight")
+        ax.set_title(title or "Commitment vectors by condition", fontsize=11)
+        ax.legend(frameon=False)
+        sns.despine(ax=ax)
+        plt.tight_layout()
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        return fig
+
+    # Radar chart
+    angles = np.linspace(0, 2 * np.pi, k, endpoint=False).tolist()
+    angles += angles[:1]  # close the polygon
+
+    sns.set_theme(style="ticks")
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(111, projection="polar")
+
+    for cond in conditions:
+        cv = list(results[cond].commitment_vector)
+        cv += cv[:1]  # close
+        color = cond_colors[cond]
+        ax.plot(angles, cv, color=color, linewidth=2.0, label=cond)
+        ax.fill(angles, cv, color=color, alpha=0.15)
+
+    # Spoke labels
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(fate_names, fontsize=10)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], fontsize=7, color="gray")
+    ax.grid(True, alpha=0.3)
+    ax.set_theta_zero_location("N")
+    ax.set_theta_direction(-1)
+
+    ax.legend(
+        loc="upper right",
+        bbox_to_anchor=(1.35, 1.1),
+        fontsize=9,
+        frameon=False,
+    )
+    ax.set_title(title or "Commitment vectors by condition", pad=20, fontsize=12)
 
     plt.tight_layout()
 

@@ -31,7 +31,7 @@ Differentiation metrics supported
 
 In all cases, higher score = more differentiated = farther from center.
 If the metric is inverted (e.g., CytoTRACE2 where high = less
-differentiated), pass invert_metric=True.
+differentiated), pass invert_ordering=True.
 """
 
 from __future__ import annotations
@@ -60,11 +60,11 @@ except ImportError:
 
 def build_star_embedding(
     adata,
-    bifurcation_cluster: str,
-    terminal_cell_types: List[str],
-    cluster_key: str = "leiden",
-    differentiation_metric: Union[str, np.ndarray] = "pseudotime",
-    invert_metric: bool = False,
+    root: str,
+    branches: List[str],
+    obs_key: str = "leiden",
+    ordering_metric: Union[str, np.ndarray] = "pseudotime",
+    invert_ordering: bool = False,
     arm_scale: float = 10.0,
     jitter: float = 0.3,
     seed: int = 42,
@@ -78,21 +78,21 @@ def build_star_embedding(
     ----------
     adata : AnnData
         Full dataset.  Will NOT be modified.
-    bifurcation_cluster : str
-        Label of the progenitor/bifurcation cluster in adata.obs[cluster_key].
+    root : str
+        Label of the progenitor/bifurcation cluster in adata.obs[obs_key].
         These cells are placed at the origin.
-    terminal_cell_types : list of str
+    branches : list of str
         Labels of the k terminal fate populations.  Each gets one radial arm.
-    cluster_key : str
+    obs_key : str
         Column in adata.obs with cluster labels.
-    differentiation_metric : str or np.ndarray
+    ordering_metric : str or np.ndarray
         How to order cells along each arm:
         - 'pseudotime'  : uses adata.obs['velocity_pseudotime'] (computed if absent)
         - 'cytotrace'   : uses adata.obs['cytotrace2_score'] (must be pre-computed)
-        - any str       : uses adata.obs[differentiation_metric] directly
+        - any str       : uses adata.obs[ordering_metric] directly
         - np.ndarray    : per-cell scores, shape (n_cells,) for the FULL adata
         Higher value = more differentiated = farther from center.
-    invert_metric : bool
+    invert_ordering : bool
         If True, invert the metric so that high values map to the center
         (use for metrics where high = less differentiated, e.g. raw CytoTRACE2).
     arm_scale : float
@@ -112,17 +112,17 @@ def build_star_embedding(
     import anndata
 
     rng = np.random.default_rng(seed)
-    obs_labels_full = adata.obs[cluster_key].astype(str).values
+    obs_labels_full = adata.obs[obs_key].astype(str).values
 
     # --- 0. Subset to relevant cells only ---
-    keep_labels = set([str(bifurcation_cluster)] + [str(f) for f in terminal_cell_types])
+    keep_labels = set([str(root)] + [str(f) for f in branches])
     keep_mask = np.array([l in keep_labels for l in obs_labels_full])
 
     if keep_mask.sum() == 0:
         raise ValueError(
-            f"No cells found matching bifurcation_cluster='{bifurcation_cluster}' "
-            f"or terminal_cell_types={terminal_cell_types} in "
-            f"adata.obs['{cluster_key}']."
+            f"No cells found matching root='{root}' "
+            f"or branches={branches} in "
+            f"adata.obs['{obs_key}']."
         )
 
     # --- Resolve differentiation metric on the FULL adata BEFORE subsetting ---
@@ -131,8 +131,8 @@ def build_star_embedding(
     # We resolve the metric on the full object, then slice to keep_mask.
     metric_for_sub: np.ndarray  # will always be a pre-resolved array after this block
 
-    if isinstance(differentiation_metric, np.ndarray):
-        arr = np.asarray(differentiation_metric, dtype=float).ravel()
+    if isinstance(ordering_metric, np.ndarray):
+        arr = np.asarray(ordering_metric, dtype=float).ravel()
         if len(arr) != adata.n_obs:
             raise ValueError(
                 f"Custom metric array has length {len(arr)}, "
@@ -141,18 +141,18 @@ def build_star_embedding(
         metric_for_sub = arr[keep_mask]
     else:
         # Resolve on full adata (graph intact), then slice
-        scores_full = _resolve_metric(adata, differentiation_metric, invert_metric)
+        scores_full = _resolve_metric(adata, ordering_metric, invert_ordering)
         metric_for_sub = scores_full[keep_mask]
 
     adata_sub = adata[keep_mask].copy()
-    obs_labels = adata_sub.obs[cluster_key].astype(str).values
+    obs_labels = adata_sub.obs[obs_key].astype(str).values
     n_cells = adata_sub.n_obs
 
     print(f"[scCS] Subsetting: {keep_mask.sum()} / {adata.n_obs} cells kept")
     print(f"       ({adata.n_obs - keep_mask.sum()} cells from other populations excluded)")
     for lbl in sorted(keep_labels):
         n = (obs_labels == lbl).sum()
-        role = "progenitor" if lbl == str(bifurcation_cluster) else "fate"
+        role = "progenitor" if lbl == str(root) else "fate"
         print(f"       {lbl}: {n} cells ({role})")
 
     # --- 1. Use the pre-resolved metric (already sliced to subset) ---
@@ -161,7 +161,7 @@ def build_star_embedding(
     scores = _fill_nan(np.asarray(metric_for_sub, dtype=float).ravel())
 
     # --- 2. Compute arm directions (evenly spaced angles) ---
-    k = len(terminal_cell_types)
+    k = len(branches)
     arm_angles_deg = np.linspace(0.0, 360.0, k, endpoint=False)
     arm_angles_rad = np.radians(arm_angles_deg)
     arm_dirs = np.stack([np.cos(arm_angles_rad), np.sin(arm_angles_rad)], axis=1)  # (k, 2)
@@ -170,14 +170,14 @@ def build_star_embedding(
     # Bifurcation cells -> arm index -1 (origin)
     # Terminal fate cells -> their arm index
     arm_assignment = np.full(n_cells, -1, dtype=int)
-    for j, fate in enumerate(terminal_cell_types):
+    for j, fate in enumerate(branches):
         mask = obs_labels == str(fate)
         arm_assignment[mask] = j
 
     # --- 4. Compute per-arm score ranges for normalization ---
-    bif_mask_sub = obs_labels == str(bifurcation_cluster)
+    bif_mask_sub = obs_labels == str(root)
     arm_score_ranges = []
-    for j, fate in enumerate(terminal_cell_types):
+    for j, fate in enumerate(branches):
         fate_mask = obs_labels == str(fate)
         combined_mask = fate_mask | bif_mask_sub
         if combined_mask.sum() > 0:
@@ -223,15 +223,15 @@ def build_star_embedding(
     adata_sub.uns["sccs"]["arm_angles_deg"] = arm_angles_deg
     adata_sub.uns["sccs"]["arm_dirs"] = arm_dirs
     adata_sub.uns["sccs"]["arm_scale"] = arm_scale
-    adata_sub.uns["sccs"]["fate_names"] = [str(f) for f in terminal_cell_types]
-    adata_sub.uns["sccs"]["bifurcation_cluster"] = str(bifurcation_cluster)
-    adata_sub.uns["sccs"]["cluster_key"] = cluster_key
+    adata_sub.uns["sccs"]["fate_names"] = [str(f) for f in branches]
+    adata_sub.uns["sccs"]["root"] = str(root)
+    adata_sub.uns["sccs"]["obs_key"] = obs_key
     # Store integer indices of kept cells in the original adata (for velocity projection)
     adata_sub.uns["sccs"]["parent_indices"] = np.where(keep_mask)[0]
 
     adata_sub.obs["sccs_arm"] = arm_assignment
-    adata_sub.obs["sccs_arm_name"] = [
-        str(terminal_cell_types[a]) if a >= 0 else str(bifurcation_cluster)
+    adata_sub.obs["sccs_branch"] = [
+        str(branches[a]) if a >= 0 else str(root)
         for a in arm_assignment
     ]
 
@@ -241,7 +241,7 @@ def build_star_embedding(
     print(
         f'       Arm angles: '
         + str({str(f): round(float(a), 1)
-               for f, a in zip(terminal_cell_types, arm_angles_deg)})
+               for f, a in zip(branches, arm_angles_deg)})
     )
 
     return adata_sub
@@ -294,21 +294,21 @@ def project_velocity_star(
     if _SCVELO_AVAILABLE and adata_full is not None and "velocity_graph" in adata_full.uns:
         if verbose:
             print("[scCS] Projecting velocity via scVelo on full adata → slicing to subset...")
-        try:
-            # Temporarily inject X_sccs into full adata for all cells.
-            # Subset cells get their star coords; other cells get zeros (ignored after slicing).
-            n_full = adata_full.n_obs
-            coords_full = np.zeros((n_full, 2), dtype=float)
-            if parent_idx is not None:
-                coords_full[parent_idx] = coords_sub
-            else:
-                # Fallback: match by obs_names
-                sub_names = set(adata_sub.obs_names)
-                full_names = list(adata_full.obs_names)
-                idx_map = [i for i, n in enumerate(full_names) if n in sub_names]
-                coords_full[idx_map] = coords_sub
+        # Temporarily inject X_sccs into full adata for all cells.
+        # Subset cells get their star coords; other cells get zeros (ignored after slicing).
+        n_full = adata_full.n_obs
+        coords_full = np.zeros((n_full, 2), dtype=float)
+        if parent_idx is not None:
+            coords_full[parent_idx] = coords_sub
+        else:
+            # Fallback: match by obs_names
+            sub_names = set(adata_sub.obs_names)
+            full_names = list(adata_full.obs_names)
+            idx_map = [i for i, n in enumerate(full_names) if n in sub_names]
+            coords_full[idx_map] = coords_sub
 
-            adata_full.obsm["X_sccs_tmp"] = coords_full
+        adata_full.obsm["X_sccs_tmp"] = coords_full
+        try:
             scv.tl.velocity_embedding(adata_full, basis="sccs_tmp")
             V_full = np.array(adata_full.obsm["velocity_sccs_tmp"])  # (n_full, 2)
 
@@ -321,11 +321,6 @@ def project_velocity_star(
             vx, vy = V_sub[:, 0], V_sub[:, 1]
             adata_sub.obsm["velocity_sccs"] = V_sub
 
-            # Clean up temporary keys
-            del adata_full.obsm["X_sccs_tmp"]
-            if "velocity_sccs_tmp" in adata_full.obsm:
-                del adata_full.obsm["velocity_sccs_tmp"]
-
             if verbose:
                 print(f"[scCS] Velocity projected. Shape: {V_sub.shape}")
             return vx, vy
@@ -337,6 +332,10 @@ def project_velocity_star(
                 RuntimeWarning,
                 stacklevel=2,
             )
+        finally:
+            # Always clean up temp keys, even if velocity_embedding raised
+            adata_full.obsm.pop("X_sccs_tmp", None)
+            adata_full.obsm.pop("velocity_sccs_tmp", None)
 
     # ── Strategy 2: graph-based projection using full adata's velocity_graph ──
     # Manually compute T[sub, :][:, sub] × coords_sub - coords_sub
@@ -636,7 +635,7 @@ def recompute_subset_pseudotime(
 ) -> np.ndarray:
     """Recompute velocity pseudotime on the subset's induced subgraph.
 
-    When ``build_star_embedding`` uses ``differentiation_metric='pseudotime'``,
+    When ``build_star_embedding`` uses ``ordering_metric='pseudotime'``,
     the pseudotime is resolved on the full adata before subsetting.  This means
     the pseudotime range within the bifurcation+fate subset is compressed and
     non-uniform: cells that span the full differentiation axis in the subset
@@ -644,16 +643,16 @@ def recompute_subset_pseudotime(
 
     This function extracts the velocity_graph submatrix for the subset cells,
     recomputes pseudotime locally, and optionally scales it to [0, 1].  The
-    result is stored in ``adata_sub.obs['velocity_pseudotime_sub']`` and
+    result is stored in ``adata_sub.obs['sccs_pseudotime']`` and
     returned as an array.
 
     Call this after ``build_embedding()`` and before (or instead of) using
     the full-adata pseudotime for arm ordering.  To rebuild the embedding with
     the corrected pseudotime, pass the returned array as a custom metric::
 
-        scorer.build_embedding(differentiation_metric='pseudotime')
-        pt_sub = recompute_subset_pseudotime(scorer.adata_sub, adata)
-        scorer.build_embedding(differentiation_metric=pt_sub_full)
+        scorer.build_embedding(ordering_metric='pseudotime')
+        pt_sub = compute_local_pseudotime(scorer.adata_sub, adata)
+        scorer.build_embedding(ordering_metric=pt_sub_full)
         # where pt_sub_full is the subset scores mapped back to full adata indices
 
     Alternatively, use the convenience method
@@ -678,7 +677,7 @@ def recompute_subset_pseudotime(
     -------
     pt_sub : np.ndarray, shape (n_sub_cells,)
         Subset-local pseudotime, stored in
-        ``adata_sub.obs['velocity_pseudotime_sub']``.
+        ``adata_sub.obs['sccs_pseudotime']``.
     """
     if not _SCVELO_AVAILABLE:
         raise ImportError(
@@ -748,12 +747,12 @@ def recompute_subset_pseudotime(
         if verbose:
             print("[scCS] Subset pseudotime scaled to [0, 1].")
 
-    adata_sub.obs["velocity_pseudotime_sub"] = pt_sub
+    adata_sub.obs["sccs_pseudotime"] = pt_sub
 
     if verbose:
         print(
             f"[scCS] Subset pseudotime stored in "
-            f"adata_sub.obs['velocity_pseudotime_sub']. "
+            f"adata_sub.obs['sccs_pseudotime']. "
             f"Range: [{pt_sub.min():.3f}, {pt_sub.max():.3f}]"
         )
 
