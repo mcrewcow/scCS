@@ -68,6 +68,7 @@ def build_star_embedding(
     arm_scale: float = 10.0,
     jitter: float = 0.3,
     seed: int = 42,
+    arm_norm: str = "global",
 ) -> "anndata.AnnData":
     """Build the radial star embedding on a subset of adata.
 
@@ -101,6 +102,35 @@ def build_star_embedding(
         Gaussian noise added perpendicular to each arm to avoid overplotting.
     seed : int
         Random seed for jitter.
+    arm_norm : {"global", "per_arm"}, default "global"
+        How to normalize the ordering metric onto the radial arms. The
+        rescale formula ``(s - s_min) / (s_max - s_min) * arm_scale`` is
+        only applied to fate cells (bifurcation cells sit at the origin);
+        ``s_min`` and ``s_max`` are computed from fate cells only in both
+        modes since v0.7.4, so the closest fate cell always maps to
+        ``r ≈ 0`` and the furthest to ``r ≈ arm_scale``.
+
+        - ``"global"`` (default, v0.7.3+): compute one
+          ``(s_min, s_max) = (fate_scores.min(), fate_scores.max())`` over
+          all fate cells and apply uniformly to every arm. Arms whose
+          cells span shorter pseudotime intervals stay visibly shorter.
+          Preserves the *relative* ordering of cells across arms — if
+          Alpha cells span a wider pseudotime range than Delta cells, the
+          Alpha arm extends further. Biologically meaningful: arm length
+          reflects how far each fate has differentiated from the
+          progenitor on a shared scale.
+        - ``"per_arm"`` (legacy, pre-v0.7.3 default): each arm gets its
+          own ``(s_min, s_max) = (fate_mask_scores.min(),
+          fate_mask_scores.max())`` and is mapped to ``[0, arm_scale]``
+          independently. All arms reach the full ``arm_scale`` regardless
+          of how compressed/extended their pseudotime range is. Provided
+          for reproducibility of older plots.
+
+        .. versionchanged:: 0.7.4
+           Both modes now compute ``s_min``/``s_max`` from fate cells
+           only, instead of including bifurcation cells. This removes a
+           visible gap between the origin and the start of each arm in
+           v0.7.3 ``"global"`` mode.
 
     Returns
     -------
@@ -174,17 +204,43 @@ def build_star_embedding(
         mask = obs_labels == str(fate)
         arm_assignment[mask] = j
 
-    # --- 4. Compute per-arm score ranges for normalization ---
+    # --- 4. Compute arm score ranges for normalization ---
+    # The rescale formula (s - s_min) / (s_max - s_min) * arm_scale is
+    # only applied to FATE cells (bifurcation cells sit at origin via L162).
+    # Computing s_min/s_max over fate cells only ensures the closest fate
+    # cell maps to r=0 and the furthest to r=arm_scale, so each arm visibly
+    # starts at the origin instead of mid-arm.
     bif_mask_sub = obs_labels == str(root)
-    arm_score_ranges = []
-    for j, fate in enumerate(branches):
-        fate_mask = obs_labels == str(fate)
-        combined_mask = fate_mask | bif_mask_sub
-        if combined_mask.sum() > 0:
-            s = scores[combined_mask]
-            arm_score_ranges.append((s.min(), s.max()))
+    fate_mask_all = np.zeros(len(scores), dtype=bool)
+    for fate in branches:
+        fate_mask_all |= (obs_labels == str(fate))
+    if arm_norm == "global":
+        # One range across all FATE cells; every arm uses it. Preserves the
+        # relative pseudotime ordering of fate cells across arms — arms whose
+        # cells span shorter pseudotime intervals stay visibly shorter.
+        if fate_mask_all.sum() > 0:
+            fate_scores = scores[fate_mask_all]
+            g_min = float(fate_scores.min())
+            g_max = float(fate_scores.max())
         else:
-            arm_score_ranges.append((scores.min(), scores.max()))
+            g_min, g_max = float(scores.min()), float(scores.max())
+        arm_score_ranges = [(g_min, g_max)] * k
+    elif arm_norm == "per_arm":
+        # Each arm rescales by its OWN fate cells' (s_min, s_max). Every
+        # arm visibly reaches the full radial cap regardless of underlying
+        # pseudotime extent (legacy behavior; ignores cross-arm comparison).
+        arm_score_ranges = []
+        for j, fate in enumerate(branches):
+            fate_mask = obs_labels == str(fate)
+            if fate_mask.sum() > 0:
+                s = scores[fate_mask]
+                arm_score_ranges.append((float(s.min()), float(s.max())))
+            else:
+                arm_score_ranges.append((float(scores.min()), float(scores.max())))
+    else:
+        raise ValueError(
+            f"arm_norm must be 'global' or 'per_arm', got {arm_norm!r}."
+        )
 
     # --- 5. Place cells in 2D ---
     coords = np.zeros((n_cells, 2), dtype=float)
@@ -223,6 +279,7 @@ def build_star_embedding(
     adata_sub.uns["sccs"]["arm_angles_deg"] = arm_angles_deg
     adata_sub.uns["sccs"]["arm_dirs"] = arm_dirs
     adata_sub.uns["sccs"]["arm_scale"] = arm_scale
+    adata_sub.uns["sccs"]["arm_norm"] = arm_norm
     adata_sub.uns["sccs"]["fate_names"] = [str(f) for f in branches]
     adata_sub.uns["sccs"]["root"] = str(root)
     adata_sub.uns["sccs"]["obs_key"] = obs_key
@@ -503,7 +560,7 @@ def _resolve_metric(
                 return _fill_nan(scores)
         scores = np.array(adata.obs["velocity_pseudotime"], dtype=float)
         # NOTE: This pseudotime was computed on the full adata.  After subsetting,
-        # the caller should invoke recompute_subset_pseudotime() to get a
+        # the caller should invoke compute_local_pseudotime() to get a
         # subset-local pseudotime with better arm coverage.
 
     elif metric == "cytotrace":
@@ -545,12 +602,28 @@ def _resolve_metric(
 
 
 def _fill_nan(scores: np.ndarray) -> np.ndarray:
-    """Replace NaN values with the column median."""
+    """Replace NaN or inf values with a sensible finite value.
+
+    NaN entries are filled with the finite median. Positive-/negative-inf
+    entries are clipped to the finite max/min so downstream consumers
+    (star embedding arm projection, etc.) never produce NaN positions
+    when fed pseudotime that contains inf from a degenerate diffmap.
+    """
+    scores = np.asarray(scores, dtype=float).copy()
+    finite = scores[np.isfinite(scores)]
+    if finite.size == 0:
+        # No information at all — return zeros.
+        return np.zeros_like(scores)
+    fin_min, fin_max, fin_med = finite.min(), finite.max(), float(np.median(finite))
+    pos_inf = np.isposinf(scores)
+    neg_inf = np.isneginf(scores)
     nan_mask = np.isnan(scores)
+    if pos_inf.any():
+        scores[pos_inf] = fin_max
+    if neg_inf.any():
+        scores[neg_inf] = fin_min
     if nan_mask.any():
-        median = np.nanmedian(scores)
-        scores = scores.copy()
-        scores[nan_mask] = median
+        scores[nan_mask] = fin_med
     return scores
 
 
@@ -627,7 +700,7 @@ def _graph_velocity_projection(
 # Subset-local pseudotime recomputation
 # ---------------------------------------------------------------------------
 
-def recompute_subset_pseudotime(
+def compute_local_pseudotime(
     adata_sub,
     adata_full,
     scale_01: bool = True,
@@ -656,7 +729,7 @@ def recompute_subset_pseudotime(
         # where pt_sub_full is the subset scores mapped back to full adata indices
 
     Alternatively, use the convenience method
-    ``CommitmentScorer.rebuild_embedding_with_subset_pseudotime()``.
+    ``SingleScorer.refit_pseudotime()``.
 
     Parameters
     ----------
@@ -785,27 +858,63 @@ def scale_metric_01(scores: np.ndarray) -> np.ndarray:
 
 
 def _fallback_dpt(adata_tmp, verbose: bool = True) -> np.ndarray:
-    """Fallback: diffusion pseudotime via scanpy when scVelo fails."""
+    """Fallback: diffusion pseudotime via scanpy when scVelo fails.
+
+    Runs ``sc.tl.diffmap`` before ``sc.tl.dpt`` (scanpy emits a warning
+    otherwise and falls back to default-parameter diffmap, which can yield
+    ``inf`` pseudotime for cells in disconnected components of a sparse
+    star-subset graph). Any remaining non-finite values are clipped to the
+    finite range, so the returned array is always finite and the star
+    embedding never produces NaN arm positions.
+    """
     if not _SCANPY_AVAILABLE:
         warnings.warn(
-            "scanpy not available for DPT fallback. Returning uniform pseudotime.",
+            "scanpy not available for DPT fallback. Returning radial distance.",
             RuntimeWarning, stacklevel=2,
         )
-        return np.linspace(0, 1, adata_tmp.n_obs)
+        coords = np.array(adata_tmp.obsm["X_sccs"])
+        return np.linalg.norm(coords, axis=1)
     try:
         import scanpy as sc
         if "connectivities" not in adata_tmp.obsp:
             sc.pp.neighbors(adata_tmp, n_neighbors=15, use_rep="X_sccs")
-        # Use the cell with lowest scCS radial distance as root
+
+        # Root = cell with smallest scCS radius
         coords = np.array(adata_tmp.obsm["X_sccs"])
         radii = np.linalg.norm(coords, axis=1)
         root_idx = int(np.argmin(radii))
         adata_tmp.uns["iroot"] = root_idx
+
+        # Prerequisite for DPT: diffusion map components.
+        # Running this explicitly avoids scanpy's default-fallback path,
+        # which on disconnected star-subsets can produce inf pseudotime.
+        try:
+            sc.tl.diffmap(adata_tmp, n_comps=15)
+        except Exception:
+            # Some adatas lack neighbors with enough components; rebuild.
+            sc.pp.neighbors(adata_tmp, n_neighbors=15, use_rep="X_sccs")
+            sc.tl.diffmap(adata_tmp, n_comps=15)
+
         sc.tl.dpt(adata_tmp)
         pt = np.array(adata_tmp.obs["dpt_pseudotime"], dtype=float)
+
+        # Repair non-finite entries (inf from disconnected diffmap components).
+        if not np.isfinite(pt).all():
+            finite = pt[np.isfinite(pt)]
+            if finite.size > 0:
+                pt = np.where(np.isfinite(pt), pt, finite.max())
+            else:
+                # Total failure: fall back to radial distance
+                pt = np.linalg.norm(coords, axis=1)
+                warnings.warn(
+                    "DPT produced no finite pseudotime; using radial distance.",
+                    RuntimeWarning, stacklevel=2,
+                )
+
         if verbose:
-            print("[scCS] Used scanpy DPT as pseudotime fallback.")
+            print("[scCS] Used scanpy DPT (with diffmap) as pseudotime fallback.")
         return pt
+
     except Exception as e2:
         warnings.warn(
             f"DPT fallback also failed ({e2}). Returning radial distance as pseudotime.",

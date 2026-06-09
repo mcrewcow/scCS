@@ -12,7 +12,7 @@ This module builds a standardized FateMap from those labels, computing
 centroids in the scCS star embedding space (X_sccs) and collecting
 per-fate cell indices.
 
-The FateMap is the single source of truth consumed by CommitmentScorer.score().
+The FateMap is the single source of truth consumed by SingleScorer.score().
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ def build_fate_map(
     if "X_sccs" not in adata.obsm:
         raise ValueError(
             "X_sccs embedding not found in adata.obsm. "
-            "Run CommitmentScorer.build_embedding() before build_fate_map()."
+            "Run SingleScorer.build_embedding() before build_fate_map()."
         )
 
     obs_labels = adata.obs[obs_key].astype(str).values

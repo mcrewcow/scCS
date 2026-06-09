@@ -13,6 +13,15 @@ Additional plots:
   plot_commitment_heatmap()  — per-cell fate affinity heatmap
   plot_expression_trends()   — CellRank-style gene expression vs pseudotime
   plot_subset_comparison()   — multi-subset CS comparison
+  plot_nn_entropy_elbow()    — elbow plot for k_nn selection
+
+Multi-condition plots (PairScorer + MultiScorer):
+  plot_delta_cs_heatmap()          — ΔCS heatmap with CI annotation
+  plot_compare_conditions_bar()    — grouped bar chart of nCS per condition
+  plot_commitment_vector_radar()   — radar chart of commitment vectors
+  plot_omnibus_summary()           — fates × conditions heatmap with omnibus significance
+  plot_posthoc_heatmap()           — condition × condition post-hoc p-value heatmap
+  plot_pairwise_delta_grid()       — grid of ΔCS heatmaps for all condition pairs
 
 Color maps
 ----------
@@ -72,6 +81,10 @@ CONDITION_PALETTE = [
     "#D55E00",  # vermillion
     "#CC79A7",  # pink
     "#000000",  # black
+    "#5B51D3",  # purple
+    "#E6AB02",  # dark gold
+    "#A6CEE3",  # light blue
+    "#B2DF8A",  # light green
 ]
 
 
@@ -117,6 +130,19 @@ def _condition_colors(
     return out
 
 
+
+
+def _significance_stars(pval: float) -> str:
+    """Return significance stars for a p-value."""
+    if pval < 0.001:
+        return "***"
+    elif pval < 0.01:
+        return "**"
+    elif pval < 0.05:
+        return "*"
+    else:
+        return "ns"
+
 # ---------------------------------------------------------------------------
 # 1. Star embedding — primary visualization
 # ---------------------------------------------------------------------------
@@ -136,6 +162,9 @@ def plot_star_embedding(
     velocity_scale: float = 1.0,
     color_map: Optional[Dict[str, str]] = None,
     title: Optional[str] = None,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    cmap: Optional[str] = None,
     ax: Optional[plt.Axes] = None,
     save_path: Optional[str] = None,
 ) -> plt.Figure:
@@ -154,12 +183,15 @@ def plot_star_embedding(
     result : CommitmentScoreResult
     color_by : str
         What to color cells by:
-        - 'fate'        : cluster/arm assignment (default)
-        - 'pseudotime'  : velocity_pseudotime from adata.obs
-        - 'entropy'     : per-cell commitment entropy (cs_entropy)
-        - 'cytotrace'   : CytoTRACE2 score
-        - any str       : any numeric or categorical column in adata.obs
-        - fate name     : per-cell affinity for that specific fate
+        - ``"fate"``        — cluster/arm assignment (default)
+        - ``"pseudotime"``  — reads ``sccs_pseudotime`` then ``velocity_pseudotime``
+        - ``"entropy"``     — per-cell commitment entropy (``cs_entropy``)
+        - ``"nn_entropy"``  — NN-smoothed entropy (``cs_nn_entropy``;
+          requires ``score(k_nn=...)``)
+        - a fate name       — per-cell affinity (``cs_{fate}``;
+          requires ``score(cell_level=True)``)
+        - any other str     — auto-detected numeric or categorical column in
+          ``adata.obs``
     figsize : tuple
     point_size : float
     alpha : float
@@ -174,6 +206,15 @@ def plot_star_embedding(
     velocity_scale : float
         Scale factor for velocity arrows.
     title : str, optional
+    vmin, vmax : float, optional
+        Color-scale limits for numeric ``color_by`` modes. Defaults to the
+        finite data range, so structure is always visible regardless of the
+        absolute entropy/affinity scale. Pass explicit values to pin limits
+        for cross-figure comparison.
+    cmap : str, optional
+        Matplotlib colormap name. Defaults: ``"RdYlBu_r"`` for entropy,
+        ``"viridis"`` for pseudotime/generic numeric, ``"Blues"`` for per-fate
+        affinity.
     ax : matplotlib Axes, optional
     save_path : str, optional
 
@@ -229,6 +270,7 @@ def plot_star_embedding(
     _scatter_cells(
         ax, adata, coords, result, color_by,
         fate_names, colors, point_size, alpha,
+        vmin=vmin, vmax=vmax, cmap=cmap,
     )
 
     # --- Velocity arrows ---
@@ -282,7 +324,7 @@ def plot_nn_entropy_elbow(
 
     Parameters
     ----------
-    scorer : CommitmentScorer
+    scorer : SingleScorer
         A fitted scorer with ``build_embedding()`` and ``fit()`` already called.
         No prior ``score()`` call is needed — cell scores are recomputed
         internally from the velocity vectors.
@@ -478,9 +520,42 @@ def plot_expression_trends(
     if missing:
         raise ValueError(f"Genes not found in adata.var_names: {missing}")
 
-    # Align adata to the subset used during scoring
+    # Align adata to the subset used during scoring.
+    # Three supported usage patterns:
+    #   (1) ``result.cell_obs_names`` == ``adata.obs_names`` (one-to-one)
+    #   (2) ``result.cell_obs_names`` is a SUBSET of ``adata.obs_names``
+    #       (passing a larger adata, e.g. full anndata).
+    #   (3) ``adata.obs_names`` is a SUBSET of ``result.cell_obs_names``
+    #       (passing a condition-masked subset of the scored adata).
+    # In case (3), cell_scores is sliced to keep only the rows whose
+    # obs_names are present in ``adata`` so x_vals stays aligned.
+    cell_score_idx = None  # if set, slice result-derived arrays through this
     if result.cell_obs_names is not None:
-        adata_sub = adata[result.cell_obs_names]
+        result_names = np.asarray(result.cell_obs_names)
+        adata_names = np.asarray(adata.obs_names)
+        # Find rows of result that are present in adata
+        adata_set = set(map(str, adata_names))
+        keep_mask = np.array([str(n) in adata_set for n in result_names])
+        n_keep = int(keep_mask.sum())
+        if n_keep == 0:
+            raise ValueError(
+                "None of result.cell_obs_names match adata.obs_names. "
+                "Pass the AnnData used during scoring (or a superset of it)."
+            )
+        if n_keep < len(result_names):
+            # case (3): adata is smaller than the scored subset.
+            warnings.warn(
+                f"plot_expression_trends: only {n_keep}/{len(result_names)} "
+                "cells from result are present in adata. Slicing result "
+                "arrays to match the passed adata.",
+                UserWarning,
+                stacklevel=2,
+            )
+            cell_score_idx = np.where(keep_mask)[0]
+            adata_sub = adata[result_names[keep_mask]]
+        else:
+            # case (1) or (2): all result cells found
+            adata_sub = adata[result_names]
     elif result.cell_scores.shape[0] != adata.n_obs:
         raise ValueError(
             f"result.cell_scores has {result.cell_scores.shape[0]} rows but "
@@ -493,7 +568,10 @@ def plot_expression_trends(
     # --- Resolve x-axis values ---
     x_axis = x_axis.lower()
     if x_axis == "affinity":
-        x_vals = result.cell_scores[:, fate_idx]
+        cs = result.cell_scores
+        if cell_score_idx is not None:
+            cs = cs[cell_score_idx]
+        x_vals = cs[:, fate_idx]
         x_label = f"Fate affinity — {fate}"
     elif x_axis == "pseudotime":
         # Prefer subset-local pseudotime if available
@@ -608,10 +686,43 @@ def plot_expression_trends(
 def _scatter_cells(
     ax, adata, coords, result, color_by,
     fate_names, colors, point_size, alpha,
+    vmin=None, vmax=None, cmap=None,
 ):
-    """Internal: scatter cells with the requested coloring scheme."""
+    """Internal: scatter cells with the requested coloring scheme.
+
+    Supports these ``color_by`` modes:
+
+    - ``"fate"`` (default) — categorical, arm / progenitor / unassigned
+    - ``"entropy"`` or ``"cs_entropy"`` — per-cell commitment entropy
+      (``adata.obs["cs_entropy"]``)
+    - ``"nn_entropy"`` or ``"cs_nn_entropy"`` — NN-smoothed entropy
+      (``adata.obs["cs_nn_entropy"]``; requires ``score(k_nn=...)``)
+    - ``"pseudotime"`` — pseudotime, reading ``sccs_pseudotime`` then
+      ``velocity_pseudotime`` (falls back to gray with a warning if neither
+      column is present)
+    - a fate name in ``fate_names`` — per-cell affinity column
+      ``cs_{fate}`` (requires ``score(cell_level=True)``)
+    - any other ``adata.obs`` column — auto-detected numeric or categorical
+
+    Numeric color scales auto-scale to the data range by default. Pass
+    ``vmin`` / ``vmax`` to pin limits (useful for cross-figure comparison).
+    Pass ``cmap`` to override the default colormap for that branch.
+    """
     sccs_meta = adata.uns.get("sccs", {})
     bif_cluster = sccs_meta.get("root", None)
+
+    def _auto_lim(values, vmin_in, vmax_in):
+        """Compute (vmin, vmax) defaulting to data min/max when not provided."""
+        finite = np.asarray(values, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        if finite.size == 0:
+            return (vmin_in if vmin_in is not None else 0.0,
+                    vmax_in if vmax_in is not None else 1.0)
+        lo = vmin_in if vmin_in is not None else float(np.nanmin(finite))
+        hi = vmax_in if vmax_in is not None else float(np.nanmax(finite))
+        if hi <= lo:
+            hi = lo + 1e-6
+        return lo, hi
 
     if color_by == "fate":
         # Color by arm assignment (categorical)
@@ -660,29 +771,80 @@ def _scatter_cells(
                        s=point_size, alpha=alpha, rasterized=True)
             return
         vals = adata.obs[col].values.astype(float)
+        lo, hi = _auto_lim(vals, vmin, vmax)
         sc = ax.scatter(
             coords[:, 0], coords[:, 1],
-            c=vals, cmap="RdYlBu_r", s=point_size, alpha=alpha,
-            vmin=0, vmax=1, zorder=2, rasterized=True,
+            c=vals, cmap=(cmap or "RdYlBu_r"),
+            s=point_size, alpha=alpha,
+            vmin=lo, vmax=hi, zorder=2, rasterized=True,
         )
         plt.colorbar(sc, ax=ax, label="Commitment entropy", shrink=0.7, pad=0.02)
 
-    elif color_by in fate_names:
-        # Per-fate affinity
-        col = f"cs_{color_by}"
+    elif color_by in ("nn_entropy", "cs_nn_entropy"):
+        col = "cs_nn_entropy"
         if col not in adata.obs:
             warnings.warn(
-                f"'{col}' not in adata.obs. Run score(compute_cell_level=True) first.",
+                "cs_nn_entropy not in adata.obs. "
+                "Call score(k_nn=...) with a positive k_nn to populate it.",
                 stacklevel=3,
             )
             ax.scatter(coords[:, 0], coords[:, 1], c="gray",
                        s=point_size, alpha=alpha, rasterized=True)
             return
         vals = adata.obs[col].values.astype(float)
+        lo, hi = _auto_lim(vals, vmin, vmax)
         sc = ax.scatter(
             coords[:, 0], coords[:, 1],
-            c=vals, cmap="Blues", s=point_size, alpha=alpha,
-            vmin=0, vmax=1, zorder=2, rasterized=True,
+            c=vals, cmap=(cmap or "RdYlBu_r"),
+            s=point_size, alpha=alpha,
+            vmin=lo, vmax=hi, zorder=2, rasterized=True,
+        )
+        plt.colorbar(sc, ax=ax, label="NN-smoothed entropy", shrink=0.7, pad=0.02)
+
+    elif color_by == "pseudotime":
+        # Try sccs_pseudotime first, then velocity_pseudotime
+        col = None
+        for candidate in ("sccs_pseudotime", "velocity_pseudotime"):
+            if candidate in adata.obs:
+                col = candidate
+                break
+        if col is None:
+            warnings.warn(
+                "Neither 'sccs_pseudotime' nor 'velocity_pseudotime' found in adata.obs. "
+                "Run refit_pseudotime() or compute velocity pseudotime first.",
+                stacklevel=3,
+            )
+            ax.scatter(coords[:, 0], coords[:, 1], c="gray",
+                       s=point_size, alpha=alpha, rasterized=True)
+            return
+        vals = adata.obs[col].values.astype(float)
+        lo, hi = _auto_lim(vals, vmin, vmax)
+        sc = ax.scatter(
+            coords[:, 0], coords[:, 1],
+            c=vals, cmap=(cmap or "viridis"),
+            s=point_size, alpha=alpha,
+            vmin=lo, vmax=hi, zorder=2, rasterized=True,
+        )
+        plt.colorbar(sc, ax=ax, label=col, shrink=0.7, pad=0.02)
+
+    elif color_by in fate_names:
+        # Per-fate affinity
+        col = f"cs_{color_by}"
+        if col not in adata.obs:
+            warnings.warn(
+                f"'{col}' not in adata.obs. Run score(cell_level=True) first.",
+                stacklevel=3,
+            )
+            ax.scatter(coords[:, 0], coords[:, 1], c="gray",
+                       s=point_size, alpha=alpha, rasterized=True)
+            return
+        vals = adata.obs[col].values.astype(float)
+        lo, hi = _auto_lim(vals, vmin, vmax)
+        sc = ax.scatter(
+            coords[:, 0], coords[:, 1],
+            c=vals, cmap=(cmap or "Blues"),
+            s=point_size, alpha=alpha,
+            vmin=lo, vmax=hi, zorder=2, rasterized=True,
         )
         plt.colorbar(sc, ax=ax, label=f"Affinity: {color_by}", shrink=0.7, pad=0.02)
 
@@ -700,10 +862,12 @@ def _scatter_cells(
         vals = adata.obs[color_by]
         try:
             vals_float = vals.astype(float).values
+            lo, hi = _auto_lim(vals_float, vmin, vmax)
             sc = ax.scatter(
                 coords[:, 0], coords[:, 1],
-                c=vals_float, cmap="viridis", s=point_size, alpha=alpha,
-                zorder=2, rasterized=True,
+                c=vals_float, cmap=(cmap or "viridis"),
+                s=point_size, alpha=alpha,
+                vmin=lo, vmax=hi, zorder=2, rasterized=True,
             )
             plt.colorbar(sc, ax=ax, label=color_by, shrink=0.7, pad=0.02)
         except (ValueError, TypeError):
@@ -907,7 +1071,7 @@ def plot_rose_grid(
     ----------
     results : dict
         Mapping of condition_label -> CommitmentScoreResult
-        (output of MultiConditionScorer.score_all_conditions()).
+        (output of PairScorer.score_all_conditions()).
     color_map : dict, optional
         fate_name -> hex color.  Falls back to FATE_PALETTE.
     figsize_per_panel : tuple
@@ -1292,13 +1456,21 @@ def plot_subset_comparison(
 ) -> plt.Figure:
     """Compare commitment scores across multiple subsets.
 
+    Subsets whose chosen reference pair yields ``inf`` (e.g. progenitor-only
+    subsets with no fate-arm cells, so ``pairwise_nCS`` is undefined) are
+    rendered as gray hatched placeholders at zero height with an ``"inf"``
+    annotation, instead of silently producing empty bars.
+
     Parameters
     ----------
     subset_results : dict
         Mapping of subset_name -> CommitmentScoreResult
-        (from CommitmentScorer.score_per_subset()).
+        (from ``SingleScorer.score_per_subset``).
     ref_fate : str, optional
+        Reference fate for the CS column. If None, use the fate with smallest
+        sector magnitude (most likely to be present in all subsets).
     normalized : bool
+        If True use ``pairwise_nCS``, else ``pairwise_unCS``.
     title : str
     figsize : tuple
     save_path : str, optional
@@ -1324,36 +1496,84 @@ def plot_subset_comparison(
             rows.append({
                 "subset": subset_name,
                 "fate": fate_name,
-                "CS": cs_val,
+                "CS": float(cs_val),
             })
 
     df = pd.DataFrame(rows)
     fate_names = df["fate"].unique().tolist()
     colors = _fate_colors(fate_names)
 
+    # Warn about subsets that have all-inf values (progenitor-only)
+    bad_subsets = (
+        df.groupby("subset")["CS"]
+          .apply(lambda s: np.all(~np.isfinite(s)))
+    )
+    progenitor_only = bad_subsets[bad_subsets].index.tolist()
+    if progenitor_only:
+        warnings.warn(
+            f"Subsets with no fate-arm cells (pairwise_nCS = inf for all pairs): "
+            f"{progenitor_only}. Rendered as hatched placeholders at y=0.",
+            stacklevel=2,
+        )
+
     sns.set_theme(style="ticks")
     fig, ax = plt.subplots(figsize=figsize)
 
-    x = np.arange(len(subset_results))
-    width = 0.8 / len(fate_names)
+    subset_names = list(subset_results.keys())
+    x = np.arange(len(subset_names))
+    width = 0.8 / max(len(fate_names), 1)
+
+    finite_max = 1.0  # for y-limit headroom
 
     for j, fate in enumerate(fate_names):
-        sub_df = df[df["fate"] == fate]
-        vals = [
-            sub_df[sub_df["subset"] == s]["CS"].values[0]
-            if len(sub_df[sub_df["subset"] == s]) > 0 else 0
-            for s in subset_results.keys()
-        ]
+        sub_df = df[df["fate"] == fate].set_index("subset")
+        vals = []
+        is_inf = []
+        for s in subset_names:
+            if s in sub_df.index:
+                v = float(sub_df.loc[s, "CS"])
+                if np.isfinite(v):
+                    vals.append(v)
+                    is_inf.append(False)
+                    finite_max = max(finite_max, v)
+                else:
+                    vals.append(0.0)
+                    is_inf.append(True)
+            else:
+                vals.append(0.0)
+                is_inf.append(False)
+
         offset = (j - len(fate_names) / 2 + 0.5) * width
-        ax.bar(x + offset, vals, width * 0.9,
-               label=fate, color=colors[fate], alpha=0.85)
+        bars = ax.bar(
+            x + offset, vals, width * 0.9,
+            label=fate, color=colors[fate], alpha=0.85,
+            edgecolor=colors[fate], linewidth=0.5,
+        )
+
+        # Post-pass: hatched placeholder for inf bars
+        for bar, inf_flag in zip(bars, is_inf):
+            if inf_flag:
+                bar.set_facecolor("#DDDDDD")
+                bar.set_edgecolor("#888888")
+                bar.set_hatch("///")
+                bar.set_alpha(0.6)
+                bar.set_height(0.04 * finite_max)  # small visible stub
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + 0.015 * finite_max,
+                    "inf",
+                    ha="center", va="bottom",
+                    fontsize=7, color="#555555", fontstyle="italic",
+                )
 
     ax.axhline(1.0, color="black", linestyle="--", linewidth=1, alpha=0.5)
     ax.set_xticks(x)
-    ax.set_xticklabels(list(subset_results.keys()), rotation=15, ha="right")
+    ax.set_xticklabels(subset_names, rotation=15, ha="right")
     ax.set_ylabel("Commitment Score (CS)")
     ax.set_title(title)
     ax.legend(frameon=False)
+    # Headroom for the "inf" labels
+    ax.set_ylim(top=finite_max * 1.15)
     sns.despine(ax=ax)
 
     plt.tight_layout()
@@ -1384,7 +1604,7 @@ def plot_delta_cs_heatmap(
     Parameters
     ----------
     delta_result : dict
-        Output of MultiConditionScorer.compute_delta_CS().
+        Output of PairScorer.compute_delta_CS().
     title : str, optional
     figsize : tuple, optional
     cmap : str
@@ -1478,7 +1698,7 @@ def plot_compare_conditions_bar(
     ----------
     results : dict
         Mapping of condition_label -> CommitmentScoreResult
-        (output of MultiConditionScorer.score_all_conditions()).
+        (output of PairScorer.score_all_conditions()).
     ref_fate : str, optional
         Reference fate for the denominator.  If None, uses the fate with
         the lowest mean M_sector across conditions.
@@ -1602,7 +1822,7 @@ def plot_commitment_vector_radar(
     ----------
     results : dict
         Mapping of condition_label -> CommitmentScoreResult
-        (output of MultiConditionScorer.score_all_conditions()).
+        (output of PairScorer.score_all_conditions()).
     color_map : dict, optional
         condition_label -> hex color.  Falls back to CONDITION_PALETTE.
     title : str, optional
@@ -1679,6 +1899,371 @@ def plot_commitment_vector_radar(
         frameon=False,
     )
     ax.set_title(title or "Commitment vectors by condition", pad=20, fontsize=12)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 12. Omnibus summary heatmap (MultiScorer)
+# ---------------------------------------------------------------------------
+
+def plot_omnibus_summary(
+    omnibus_df,
+    results: Dict[str, CommitmentScoreResult],
+    posthoc_df=None,
+    figsize: Optional[Tuple[float, float]] = None,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Summary heatmap: fates × conditions showing omnibus significance.
+
+    Left panel: heatmap of mean per-cell affinity per fate per condition,
+    annotated with omnibus p-value stars.
+    Right panel (if posthoc_df provided): significant pairwise comparisons
+    as a connectivity grid.
+
+    Parameters
+    ----------
+    omnibus_df : pd.DataFrame
+        Output of MultiScorer.compare_omnibus().
+        Columns: fate, test, statistic, pval, pval_adj, significant.
+    results : dict
+        Mapping of condition_label -> CommitmentScoreResult
+        (output of MultiScorer.score_all_conditions()).
+    posthoc_df : pd.DataFrame, optional
+        Output of MultiScorer.compare_posthoc().
+        If provided, right panel shows post-hoc significance grid.
+    figsize : tuple, optional
+    save_path : str, optional
+
+    Returns
+    -------
+    fig : matplotlib Figure
+    """
+    import pandas as pd
+
+    conditions = list(results.keys())
+    fate_names = list(results.values())[0].fate_names
+    n_conds = len(conditions)
+    n_fates = len(fate_names)
+
+    # Build mean affinity matrix: fates × conditions
+    mean_affinity = np.zeros((n_fates, n_conds))
+    for ci, cond in enumerate(conditions):
+        res = results[cond]
+        if res.cell_scores is not None:
+            for fi in range(n_fates):
+                mean_affinity[fi, ci] = res.cell_scores[:, fi].mean()
+        else:
+            # Fall back to M_sector proportions
+            total_m = res.M_sector.sum()
+            if total_m > 0:
+                mean_affinity[fi, ci] = res.M_sector[fi] / total_m
+
+    # Build annotation with significance stars from omnibus_df
+    annot = np.empty((n_fates, n_conds), dtype=object)
+    omnibus_map = {}
+    if omnibus_df is not None and len(omnibus_df) > 0:
+        for _, row in omnibus_df.iterrows():
+            omnibus_map[row["fate"]] = row
+
+    for fi, fate in enumerate(fate_names):
+        for ci, cond in enumerate(conditions):
+            val = mean_affinity[fi, ci]
+            if fate in omnibus_map:
+                pval_adj = omnibus_map[fate]["pval_adj"]
+                stars = _significance_stars(pval_adj)
+                annot[fi, ci] = f"{val:.3f}\n{stars}"
+            else:
+                annot[fi, ci] = f"{val:.3f}"
+
+    # Determine layout
+    has_posthoc = posthoc_df is not None and len(posthoc_df) > 0
+    n_panels = 2 if has_posthoc else 1
+
+    if figsize is None:
+        panel_w = max(4, n_conds * 1.5)
+        panel_h = max(3, n_fates * 0.8)
+        figsize = (panel_w * n_panels + 1, panel_h)
+
+    sns.set_theme(style="ticks")
+    if has_posthoc:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize,
+                                         gridspec_kw={"width_ratios": [2, 1]})
+    else:
+        fig, ax1 = plt.subplots(1, 1, figsize=figsize)
+        ax2 = None
+
+    # --- Left panel: mean affinity heatmap ---
+    aff_df = pd.DataFrame(mean_affinity, index=fate_names, columns=conditions)
+    sns.heatmap(
+        aff_df, ax=ax1,
+        cmap="YlOrRd", annot=annot, fmt="",
+        linewidths=0.5,
+        cbar_kws={"label": "Mean affinity", "shrink": 0.8},
+        annot_kws={"size": 9},
+    )
+    ax1.set_title("Mean affinity + omnibus significance", fontsize=11)
+    ax1.set_xlabel("Condition")
+    ax1.set_ylabel("Fate")
+
+    # --- Right panel: post-hoc significance grid ---
+    if ax2 is not None and posthoc_df is not None:
+        # Count significant pairwise comparisons per fate
+        sig_counts = {}
+        for fate in fate_names:
+            fate_posthoc = posthoc_df[posthoc_df["fate"] == fate]
+            sig_counts[fate] = fate_posthoc["significant"].sum() if "significant" in fate_posthoc.columns else 0
+
+        # Build a simple bar chart of significant comparison counts per fate
+        sig_vals = [sig_counts.get(f, 0) for f in fate_names]
+        fate_colors = _fate_colors(fate_names)
+        bar_colors = [fate_colors[f] for f in fate_names]
+
+        ax2.barh(fate_names, sig_vals, color=bar_colors, alpha=0.85)
+        ax2.set_xlabel("Significant pairwise comparisons")
+        ax2.set_title("Post-hoc significance count", fontsize=11)
+        ax2.invert_yaxis()
+        sns.despine(ax=ax2)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 13. Post-hoc heatmap (MultiScorer)
+# ---------------------------------------------------------------------------
+
+def plot_posthoc_heatmap(
+    posthoc_df,
+    fate: Optional[str] = None,
+    figsize: Optional[Tuple[float, float]] = None,
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Condition × condition heatmap of post-hoc p-values for a given fate.
+
+    Lower triangle: p-values (color intensity). Upper triangle: delta mean
+    affinity. Annotated with significance stars.
+
+    Parameters
+    ----------
+    posthoc_df : pd.DataFrame
+        Output of MultiScorer.compare_posthoc().
+        Columns: fate, comparison, method, statistic, pval, pval_adj,
+                 significant, mean_A, mean_B, delta_mean.
+    fate : str, optional
+        Which fate to plot. If None, uses the first fate in posthoc_df.
+    figsize : tuple, optional
+    save_path : str, optional
+
+    Returns
+    -------
+    fig : matplotlib Figure
+    """
+    import pandas as pd
+
+    if posthoc_df is None or len(posthoc_df) == 0:
+        raise ValueError("posthoc_df is empty or None.")
+
+    # Resolve fate
+    if fate is None:
+        fate = posthoc_df["fate"].iloc[0]
+    fate_df = posthoc_df[posthoc_df["fate"] == fate]
+    if len(fate_df) == 0:
+        raise ValueError(f"No post-hoc results for fate '{fate}'.")
+
+    # Extract unique conditions from comparison strings
+    all_conds = set()
+    for comp in fate_df["comparison"]:
+        parts = comp.split(" vs ")
+        if len(parts) == 2:
+            all_conds.add(parts[0].strip())
+            all_conds.add(parts[1].strip())
+    conditions = sorted(all_conds)
+    n = len(conditions)
+    cond_idx = {c: i for i, c in enumerate(conditions)}
+
+    if n < 2:
+        raise ValueError(f"Need at least 2 conditions for post-hoc heatmap, got {n}.")
+
+    # Build matrices
+    pval_matrix = np.full((n, n), np.nan)
+    delta_matrix = np.full((n, n), np.nan)
+    sig_matrix = np.full((n, n), False)
+
+    for _, row in fate_df.iterrows():
+        comp = row["comparison"]
+        parts = comp.split(" vs ")
+        if len(parts) != 2:
+            continue
+        a, b = parts[0].strip(), parts[1].strip()
+        ai, bi = cond_idx[a], cond_idx[b]
+
+        pval_matrix[ai, bi] = row["pval_adj"]
+        pval_matrix[bi, ai] = row["pval_adj"]
+
+        delta_matrix[ai, bi] = row.get("delta_mean", np.nan)
+        delta_matrix[bi, ai] = -row.get("delta_mean", np.nan) if not np.isnan(row.get("delta_mean", np.nan)) else np.nan
+
+        sig_matrix[ai, bi] = row.get("significant", False)
+        sig_matrix[bi, ai] = row.get("significant", False)
+
+    # Build annotation: lower = p-value + stars, upper = delta + stars
+    annot = np.empty((n, n), dtype=object)
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                annot[i, j] = ""
+            elif i > j:
+                # Lower triangle: p-value
+                p = pval_matrix[i, j]
+                if not np.isnan(p):
+                    stars = _significance_stars(p)
+                    annot[i, j] = f"{p:.3f}\n{stars}"
+                else:
+                    annot[i, j] = ""
+            else:
+                # Upper triangle: delta mean
+                d = delta_matrix[i, j]
+                if not np.isnan(d):
+                    stars = _significance_stars(pval_matrix[i, j]) if not np.isnan(pval_matrix[i, j]) else ""
+                    annot[i, j] = f"{d:+.3f}\n{stars}"
+                else:
+                    annot[i, j] = ""
+
+    if figsize is None:
+        figsize = (max(5, n * 1.5), max(4, n * 1.3))
+
+    sns.set_theme(style="ticks")
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Use pval_matrix for color scale (lower triangle)
+    # Mask upper triangle for p-value coloring
+    pval_display = np.copy(pval_matrix)
+    pval_display[np.triu_indices(n)] = np.nan  # mask upper
+
+    # Plot p-value heatmap (lower triangle)
+    log_pval = -np.log10(np.clip(pval_display, 1e-10, None))
+    log_df = pd.DataFrame(log_pval, index=conditions, columns=conditions)
+
+    sns.heatmap(
+        log_df, ax=ax,
+        cmap="Reds", annot=annot, fmt="",
+        linewidths=0.5,
+        cbar_kws={"label": "-log10(adj p-value)", "shrink": 0.8},
+        annot_kws={"size": 9},
+    )
+
+    ax.set_title(f"Post-hoc comparisons — {fate}", fontsize=11)
+    ax.set_xlabel("Condition")
+    ax.set_ylabel("Condition")
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 14. Pairwise delta grid (MultiScorer)
+# ---------------------------------------------------------------------------
+
+def plot_pairwise_delta_grid(
+    delta_results: Dict[Tuple[str, str], dict],
+    figsize_per_panel: Tuple[float, float] = (4, 4),
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Grid of ΔCS heatmaps for all condition pairs.
+
+    Each panel shows the ΔnCS heatmap for one condition pair,
+    using the same layout as plot_delta_cs_heatmap().
+
+    Parameters
+    ----------
+    delta_results : dict
+        Output of MultiScorer.compute_pairwise_deltas().
+        Mapping of (cond_a, cond_b) -> delta_result dict.
+    figsize_per_panel : tuple
+        Size of each subplot.
+    save_path : str, optional
+
+    Returns
+    -------
+    fig : matplotlib Figure
+    """
+    import pandas as pd
+
+    pairs = list(delta_results.keys())
+    n_pairs = len(pairs)
+    if n_pairs == 0:
+        raise ValueError("delta_results is empty.")
+
+    ncols = min(n_pairs, 3)
+    nrows = int(np.ceil(n_pairs / ncols))
+    fig, axes = plt.subplots(
+        nrows, ncols,
+        figsize=(figsize_per_panel[0] * ncols, figsize_per_panel[1] * nrows),
+        squeeze=False,
+    )
+
+    for idx, (pair, delta_result) in enumerate(delta_results.items()):
+        row, col = divmod(idx, ncols)
+        ax = axes[row][col]
+
+        delta = delta_result["delta_nCS"]
+        ci_low = delta_result["ci_low"]
+        ci_high = delta_result["ci_high"]
+        fate_names = delta_result["fate_names"]
+        cond_a = delta_result["condition_a"]
+        cond_b = delta_result["condition_b"]
+
+        k = len(fate_names)
+        ci_half = (ci_high - ci_low) / 2.0
+
+        # Build annotation
+        annot = np.empty((k, k), dtype=object)
+        for i in range(k):
+            for j in range(k):
+                d = delta[i, j]
+                h = ci_half[i, j]
+                if np.isfinite(d) and np.isfinite(h):
+                    annot[i, j] = f"{d:+.2f}\n±{h:.2f}"
+                elif np.isfinite(d):
+                    annot[i, j] = f"{d:+.2f}"
+                else:
+                    annot[i, j] = "—"
+
+        df = pd.DataFrame(delta, index=fate_names, columns=fate_names)
+        finite_vals = delta[np.isfinite(delta)]
+        vmax = np.abs(finite_vals).max() if len(finite_vals) > 0 else 1.0
+
+        sns.heatmap(
+            df, ax=ax,
+            cmap="RdBu_r", center=0, vmin=-vmax, vmax=vmax,
+            annot=annot, fmt="",
+            linewidths=0.5,
+            cbar=False,
+            annot_kws={"size": 7},
+        )
+        ax.set_title(f"ΔCS: {cond_a} − {cond_b}", fontsize=9)
+        ax.set_xlabel("Ref fate", fontsize=8)
+        ax.set_ylabel("Query fate", fontsize=8)
+        ax.tick_params(labelsize=7)
+
+    # Hide unused axes
+    for idx in range(n_pairs, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row][col].set_visible(False)
 
     plt.tight_layout()
 

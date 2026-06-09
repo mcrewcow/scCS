@@ -1,27 +1,19 @@
 """
-trajectory.py — CommitmentScorer: main user-facing API for scCS.
+single.py — SingleScorer: single-condition commitment score analysis for scCS.
 
 Orchestrates:
 1. RNA velocity computation (optional, via scVelo)
 2. Radial star embedding construction (embedding.py)
-   → subsets adata to bifurcation + terminal fate cells only
 3. FateMap construction from user-supplied cluster labels (bifurcation.py)
 4. Commitment score computation (scores.py)
 5. Driver gene analysis (drivers.py)
 6. Pathway enrichment (enrichment.py)
 7. Plotting (plot.py)
 
-The key design change from commitscores:
-  - The bifurcation point is a single user-supplied cluster label
-    (e.g., leiden cluster '17'), not auto-detected.
-  - The embedding is a radial star layout, not FA2/UMAP.
-  - Cells are ordered along each arm by a differentiation metric.
-  - Only bifurcation + terminal fate cells are included in the embedding.
-
 Quick start
 -----------
 >>> import scCS
->>> scorer = scCS.CommitmentScorer(
+>>> scorer = scCS.SingleScorer(
 ...     adata,
 ...     root='17',
 ...     branches=['Monocyte', 'DC', 'Neutrophil'],
@@ -47,14 +39,9 @@ from typing import List, Literal, Optional, Union
 import numpy as np
 import pandas as pd
 
+from ._base import _BaseScorer, SectorMode
 from .bifurcation import FateMap, build_fate_map
-from .embedding import (
-    build_star_embedding,
-    project_velocity_star,
-    run_velocity_pipeline,
-    recompute_subset_pseudotime,
-    scale_metric_01,
-)
+from .embedding import run_velocity_pipeline
 from .scores import (
     CommitmentScoreResult,
     bin_angles,
@@ -77,10 +64,7 @@ from .drivers import get_velocity_drivers, get_deg_drivers, get_velocity_fate_dr
 from .enrichment import run_enrichment_per_fate
 
 
-SectorMode = Literal["centroid", "equal"]
-
-
-class CommitmentScorer:
+class SingleScorer(_BaseScorer):
     """RNA velocity commitment scorer with radial star embedding.
 
     Computes commitment scores for a k-furcation defined by a single
@@ -115,7 +99,7 @@ class CommitmentScorer:
     Examples
     --------
     # k=2 bifurcation
-    scorer = CommitmentScorer(
+    scorer = SingleScorer(
         adata,
         root='17',
         branches=['homeostatic', 'activated'],
@@ -127,7 +111,7 @@ class CommitmentScorer:
     scorer.plot_star(result)
 
     # k=3 with CytoTRACE2
-    scorer = CommitmentScorer(
+    scorer = SingleScorer(
         adata,
         root='5',
         branches=['FateA', 'FateB', 'FateC'],
@@ -149,21 +133,15 @@ class CommitmentScorer:
         sector_method: SectorMode = "centroid",
         copy: bool = False,
     ):
-        self.adata = adata.copy() if copy else adata
-        self.root = str(root)
-        self.branches = list(branches)
-        self.obs_key = obs_key
-        self.n_angle_bins = n_angle_bins
-        self.sector_method = sector_method
-
-        self._fate_map: Optional[FateMap] = None
-        self._vx: Optional[np.ndarray] = None
-        self._vy: Optional[np.ndarray] = None
-        self._embedding_built = False
-        self._fitted = False
-        self._needs_refit = False  # set True after rebuild_embedding_with_subset_pseudotime
-        # adata_sub: subset containing only bifurcation + terminal fate cells
-        self.adata_sub = None
+        super().__init__(
+            adata=adata,
+            root=root,
+            branches=branches,
+            obs_key=obs_key,
+            n_angle_bins=n_angle_bins,
+            sector_method=sector_method,
+            copy=copy,
+        )
 
     # ------------------------------------------------------------------
     # Step 1 (optional): RNA velocity
@@ -177,7 +155,7 @@ class CommitmentScorer:
         n_neighbors: int = 30,
         min_shared_counts: int = 20,
         verbose: bool = True,
-    ) -> "CommitmentScorer":
+    ) -> "SingleScorer":
         """Run the full scVelo RNA velocity pipeline.
 
         Call this if adata does not yet have velocity vectors.
@@ -205,137 +183,10 @@ class CommitmentScorer:
         return self
 
     # ------------------------------------------------------------------
-    # Step 2: Build the radial star embedding
-    # ------------------------------------------------------------------
-
-    def build_embedding(
-        self,
-        ordering_metric: Union[str, np.ndarray] = "pseudotime",
-        invert_ordering: bool = False,
-        scale_ordering: bool = False,
-        arm_scale: float = 10.0,
-        jitter: float = 0.3,
-        seed: int = 42,
-        verbose: bool = True,
-    ) -> "CommitmentScorer":
-        """Construct the radial star embedding (X_sccs).
-
-        Places the bifurcation cluster at the origin and arranges each
-        terminal fate on its own radial arm.  Cells are ordered along
-        each arm by the differentiation metric.
-
-        Parameters
-        ----------
-        ordering_metric : str or np.ndarray
-            Metric used to order cells along each arm:
-            - 'pseudotime'  : scVelo velocity_pseudotime (computed if absent)
-            - 'cytotrace'   : CytoTRACE2 score (adata.obs['cytotrace2_score'])
-            - any str       : any numeric column in adata.obs
-            - np.ndarray    : per-cell scores, shape (n_cells,)
-            Higher value = more differentiated = farther from center.
-        invert_ordering : bool
-            Set True if your metric is inverted (high = less differentiated).
-            Note: CytoTRACE2 inversion is handled automatically.
-        scale_ordering : bool
-            If True, min-max scale the metric to [0, 1] before embedding.
-            Useful when the metric has a compressed range within the subset
-            (e.g., full-adata pseudotime).  For pseudotime, prefer calling
-            ``refit_pseudotime()`` instead, which recomputes pseudotime on
-            the subset subgraph before scaling.
-            Default: False.
-        arm_scale : float
-            Maximum radial distance (arm length).
-        jitter : float
-            Perpendicular noise to avoid overplotting.
-        seed : int
-        verbose : bool
-
-        Returns
-        -------
-        self
-        """
-        if verbose:
-            print(
-                f"[scCS] Building star embedding: "
-                f"root='{self.root}', "
-                f"k={len(self.branches)} fates, "
-                f"metric='{ordering_metric}'"
-            )
-
-        metric = ordering_metric
-        if scale_ordering and isinstance(metric, np.ndarray):
-            metric = scale_metric_01(metric)
-            if verbose:
-                print("[scCS] Metric scaled to [0, 1].")
-
-        self.adata_sub = build_star_embedding(
-            self.adata,
-            root=self.root,
-            branches=self.branches,
-            obs_key=self.obs_key,
-            ordering_metric=metric,
-            invert_ordering=invert_ordering,
-            arm_scale=arm_scale,
-            jitter=jitter,
-            seed=seed,
-        )
-        self._embedding_built = True
-
-        if verbose:
-            print(
-                f"[scCS] Star embedding stored in scorer.adata_sub.obsm['X_sccs']. "
-                f"({self.adata_sub.n_obs} cells)"
-            )
-
-        return self
-
-    # ------------------------------------------------------------------
-    # Step 3: Project velocity into the star embedding
-    # ------------------------------------------------------------------
-
-    def project_velocity(self, verbose: bool = True) -> "CommitmentScorer":
-        """Project RNA velocity vectors into the scCS star embedding.
-
-        Call after build_embedding().  Uses the full adata's velocity_graph
-        (intact graph, correct dimensions) and slices to the subset cells.
-
-        Returns
-        -------
-        self
-        """
-        self._check_embedding()
-        self._vx, self._vy = project_velocity_star(
-            self.adata_sub,
-            adata_full=self.adata,   # pass full adata so graph dims are correct
-            verbose=verbose,
-        )
-        return self
-
-    def load_velocity_vectors(
-        self, vx: np.ndarray, vy: np.ndarray
-    ) -> "CommitmentScorer":
-        """Directly supply pre-computed velocity vectors in scCS space.
-
-        Use this when you have computed velocity externally or want to
-        use a custom displacement field.
-
-        Parameters
-        ----------
-        vx, vy : np.ndarray, shape (n_cells,)
-
-        Returns
-        -------
-        self
-        """
-        self._vx = np.asarray(vx, dtype=float)
-        self._vy = np.asarray(vy, dtype=float)
-        return self
-
-    # ------------------------------------------------------------------
     # Step 4: Fit (build FateMap)
     # ------------------------------------------------------------------
 
-    def fit(self, verbose: bool = True) -> "CommitmentScorer":
+    def fit(self, verbose: bool = True) -> "SingleScorer":
         """Build the FateMap from the user-supplied cluster labels.
 
         Must be called after build_embedding().
@@ -405,15 +256,9 @@ class CommitmentScorer:
             Per-cell scores are still computed for all cells.
         cell_level : bool
             Whether to compute per-cell fate affinity scores.
-            When True, ``result.mean_cell_entropy``, ``result.per_fate_entropy``,
-            and (if k_nn is set) ``result.nn_cell_entropy`` are populated.
-            When False, these fields are NaN / None.
         k_nn : int, optional
             If set, compute NN-smoothed per-cell entropy using this many
             nearest neighbors in the scCS embedding (X_sccs).
-            Result stored in ``result.nn_cell_entropy`` and
-            ``adata_sub.obs['cs_nn_entropy']``.
-            Use ``scorer.plot_nn_entropy_elbow()`` to choose a good value.
         n_bootstrap : int
             Number of bootstrap replicates for CS confidence intervals.
             0 (default) disables bootstrapping.  Recommended: 500.
@@ -423,11 +268,7 @@ class CommitmentScorer:
             Random seed for bootstrap resampling.
         verbose : bool
         write_to_obs : bool
-            If True (default), write per-cell scores (``cs_{fate}``,
-            ``cs_dominant_fate``, ``cs_entropy``, ``cs_nn_entropy``) to
-            ``adata_sub.obs``.  Set to False when calling from a loop
-            (e.g., ``score_per_subset`` or ``MultiConditionScorer``) to
-            prevent each iteration from overwriting the previous one.
+            If True (default), write per-cell scores to ``adata_sub.obs``.
 
         Returns
         -------
@@ -508,7 +349,6 @@ class CommitmentScorer:
             per_fate_ent = compute_per_fate_cell_entropy(cell_scores)
 
             # Write per-cell fate scores and raw entropy to adata_sub.obs
-            # (skipped when write_to_obs=False to avoid clobbering in loops)
             k_fates = cell_scores.shape[1]
             with np.errstate(divide="ignore", invalid="ignore"):
                 log_s = np.where(cell_scores > 0, np.log(cell_scores), 0.0)
@@ -579,14 +419,10 @@ class CommitmentScorer:
         n_bootstrap: int = 0,
         verbose: bool = False,
     ) -> dict:
-        """Compute commitment scores separately for each value of subset_key.
+        """Compute commitment scores separately for each value of split_by.
 
         Useful for comparing commitment across conditions, time points,
         or trajectory directions.
-
-        .. note::
-            The ``cell_mask`` is applied to ``adata_sub`` (the embedding subset),
-            not the full adata.  Only cells present in the embedding are scored.
 
         Parameters
         ----------
@@ -603,8 +439,6 @@ class CommitmentScorer:
         """
         self._check_fitted()
         results = {}
-        # Prefer adata_sub.obs; fall back to adata.obs aligned by obs_names.
-        # Users typically add metadata to the full adata, not adata_sub.
         if split_by in self.adata_sub.obs.columns:
             subset_col = self.adata_sub.obs[split_by]
         elif split_by in self.adata.obs.columns:
@@ -625,7 +459,7 @@ class CommitmentScorer:
                 cell_mask=mask,
                 cell_level=cell_level,
                 n_bootstrap=n_bootstrap,
-                verbose=False,   # suppress score()'s own print; we print below
+                verbose=False,
                 write_to_obs=False,
             )
             # Warn when all off-diagonal nCS are inf (progenitor-only subset)
@@ -645,215 +479,6 @@ class CommitmentScorer:
         return results
 
     # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
-
-    @property
-    def fate_map(self) -> Optional[FateMap]:
-        return self._fate_map
-
-    @property
-    def is_fitted(self) -> bool:
-        return self._fitted
-
-    @property
-    def embedding(self) -> Optional[np.ndarray]:
-        """The X_sccs star embedding coordinates, shape (n_subset_cells, 2)."""
-        if self.adata_sub is not None and "X_sccs" in self.adata_sub.obsm:
-            return np.array(self.adata_sub.obsm["X_sccs"])
-        return None
-
-    # ------------------------------------------------------------------
-    # Subset pseudotime recomputation
-    # ------------------------------------------------------------------
-
-    def compute_local_pseudotime(
-        self,
-        scale_01: bool = True,
-        verbose: bool = True,
-    ) -> np.ndarray:
-        """Recompute velocity pseudotime on the subset's induced subgraph.
-
-        When ``build_embedding(ordering_metric='pseudotime')`` is used,
-        pseudotime is resolved on the full adata before subsetting.  This can
-        compress the pseudotime range within the subset, leaving cells poorly
-        distributed along the arms (e.g., all clustered near the origin).
-
-        This method extracts the velocity_graph submatrix for the subset cells,
-        recomputes pseudotime locally, and optionally scales it to [0, 1].
-        The result is stored in ``adata_sub.obs['sccs_pseudotime']``.
-
-        After calling this, rebuild the embedding with the corrected pseudotime::
-
-            scorer.build_embedding(ordering_metric='pseudotime')
-            scorer.compute_local_pseudotime(scale_01=True)
-            scorer.refit_pseudotime()
-            scorer.fit()
-
-        Parameters
-        ----------
-        scale_01 : bool
-            If True (default), min-max scale the recomputed pseudotime to [0, 1]
-            within the subset.  Recommended: ensures cells span the full arm
-            length regardless of where the subset sits in the global range.
-            If False, raw pseudotime values are kept (useful for cross-condition
-            comparisons where absolute pseudotime ordering matters).
-        verbose : bool
-
-        Returns
-        -------
-        pt_sub : np.ndarray, shape (n_sub_cells,)
-            Subset-local pseudotime, also stored in
-            ``adata_sub.obs['sccs_pseudotime']``.
-        """
-        self._check_embedding()
-        return recompute_subset_pseudotime(
-            self.adata_sub,
-            adata_full=self.adata,
-            scale_01=scale_01,
-            verbose=verbose,
-        )
-
-    def refit_pseudotime(
-        self,
-        scale_01: bool = True,
-        arm_scale: float = 10.0,
-        jitter: float = 0.3,
-        seed: int = 42,
-        verbose: bool = True,
-    ) -> "CommitmentScorer":
-        """Rebuild the star embedding using subset-local pseudotime.
-
-        Convenience wrapper that:
-        1. Recomputes pseudotime on the subset's induced velocity subgraph.
-        2. Optionally scales it to [0, 1] (recommended).
-        3. Rebuilds the star embedding using the corrected pseudotime.
-
-        This corrects the arm-coverage problem that arises when the full-adata
-        pseudotime is compressed within the subset (cells cluster near the
-        origin instead of spanning the arm).
-
-        Parameters
-        ----------
-        scale_01 : bool
-            Scale subset pseudotime to [0, 1] before rebuilding.  Default True.
-        arm_scale : float
-            Maximum radial distance (arm length).
-        jitter : float
-            Perpendicular noise to avoid overplotting.
-        seed : int
-        verbose : bool
-
-        Returns
-        -------
-        self
-        """
-        self._check_embedding()
-
-        # Step 1: recompute pseudotime on the subset subgraph
-        pt_sub = recompute_subset_pseudotime(
-            self.adata_sub,
-            adata_full=self.adata,
-            scale_01=scale_01,
-            verbose=verbose,
-        )
-
-        # Step 2: map local pseudotime back to full-adata indices so that
-        # build_star_embedding can slice it correctly via keep_mask
-        parent_idx = self.adata_sub.uns.get("sccs", {}).get("parent_indices", None)
-        pt_full = np.full(self.adata.n_obs, np.nan)
-        if parent_idx is not None:
-            pt_full[parent_idx] = pt_sub
-        else:
-            sub_names = list(self.adata_sub.obs_names)
-            full_names = list(self.adata.obs_names)
-            name_to_full = {n: i for i, n in enumerate(full_names)}
-            for sub_i, name in enumerate(sub_names):
-                if name in name_to_full:
-                    pt_full[name_to_full[name]] = pt_sub[sub_i]
-
-        # Fill non-subset cells with median (they will be excluded by keep_mask anyway)
-        nan_mask = np.isnan(pt_full)
-        if nan_mask.any():
-            pt_full[nan_mask] = np.nanmedian(pt_full)
-
-        # Step 3: rebuild embedding with the corrected metric
-        if verbose:
-            print("[scCS] Rebuilding star embedding with subset-local pseudotime...")
-
-        self.adata_sub = build_star_embedding(
-            self.adata,
-            root=self.root,
-            branches=self.branches,
-            obs_key=self.obs_key,
-            ordering_metric=pt_full,
-            invert_ordering=False,
-            arm_scale=arm_scale,
-            jitter=jitter,
-            seed=seed,
-        )
-        self._embedding_built = True
-        self._fitted = False   # must re-fit after rebuilding
-        self._needs_refit = True  # triggers informative error if fit() is skipped
-        self._vx = None
-        self._vy = None
-
-        if verbose:
-            print(
-                "[scCS] Embedding rebuilt. Call fit() again to update the FateMap "
-                "and velocity projection."
-            )
-
-        return self
-
-    # ------------------------------------------------------------------
-    # Internal checks
-    # ------------------------------------------------------------------
-
-    def _check_embedding(self):
-        if not self._embedding_built:
-            raise RuntimeError(
-                "Star embedding not built. Call build_embedding() first."
-            )
-
-    def _check_fitted(self):
-        if not self._fitted:
-            if self._needs_refit:
-                raise RuntimeError(
-                    "Embedding was rebuilt. Call fit() again to update the "
-                    "FateMap and velocity projection before scoring."
-                )
-            raise RuntimeError(
-                "CommitmentScorer is not fitted. Call fit() first."
-            )
-        if self._vx is None:
-            raise RuntimeError(
-                "Velocity vectors not loaded. Call project_velocity() or "
-                "load_velocity_vectors() after build_embedding()."
-            )
-
-    # ------------------------------------------------------------------
-    # Representation
-    # ------------------------------------------------------------------
-
-    def __repr__(self) -> str:
-        if self._fitted:
-            status = "fitted"
-        elif self._needs_refit:
-            status = "needs refit (embedding rebuilt)"
-        elif self._embedding_built:
-            status = "embedding built"
-        else:
-            status = "uninitialised"
-        return (
-            f"CommitmentScorer("
-            f"root='{self.root}', "
-            f"branches={self.branches}, "
-            f"k={len(self.branches)}, "
-            f"status='{status}')"
-        )
-
-    # ------------------------------------------------------------------
     # Label transfer to full adata
     # ------------------------------------------------------------------
 
@@ -867,8 +492,7 @@ class CommitmentScorer:
 
         After scoring, per-cell fate affinities, dominant fate, and entropy
         are stored in ``adata_sub.obs``.  This method transfers those columns
-        to the full adata so they can be used in downstream analyses (e.g.,
-        UMAP coloring, integration with other tools).
+        to the full adata so they can be used in downstream analyses.
 
         Cells not in the embedding subset receive NaN for numeric columns
         and 'unassigned' for categorical columns.
@@ -876,19 +500,11 @@ class CommitmentScorer:
         Parameters
         ----------
         adata : AnnData
-            The full dataset (same object passed to CommitmentScorer.__init__).
+            The full dataset (same object passed to SingleScorer.__init__).
         result : CommitmentScoreResult
             Output of scorer.score(cell_level=True).
         prefix : str
             Column prefix.  Default: 'cs_'.
-
-        Columns written to adata.obs
-        ----------------------------
-        ``{prefix}{fate_name}``     : per-cell fate affinity (float, NaN outside subset)
-        ``{prefix}dominant_fate``   : dominant fate label (str, 'unassigned' outside subset)
-        ``{prefix}entropy``         : per-cell commitment entropy (float, NaN outside subset)
-        ``{prefix}nn_entropy``      : NN-smoothed entropy if computed (float, NaN outside subset)
-        ``{prefix}sccs_pseudotime`` : subset-local pseudotime if computed (float, NaN outside subset)
         """
         self._check_fitted()
         if result.cell_scores is None:
@@ -975,10 +591,10 @@ class CommitmentScorer:
             "_needs_refit",
         ]}
         pathlib.Path(path).write_bytes(pickle.dumps(state))
-        print(f"[scCS] CommitmentScorer state saved to '{path}'.")
+        print(f"[scCS] SingleScorer state saved to '{path}'.")
 
     @classmethod
-    def load(cls, path: str, adata) -> "CommitmentScorer":
+    def load(cls, path: str, adata) -> "SingleScorer":
         """Load a scorer from a pickle file.
 
         Parameters
@@ -987,11 +603,11 @@ class CommitmentScorer:
             Path to a file saved by :meth:`save`.
         adata : AnnData
             The full dataset (same object originally passed to
-            ``CommitmentScorer.__init__``).  Not stored in the pickle.
+            ``SingleScorer.__init__``).  Not stored in the pickle.
 
         Returns
         -------
-        CommitmentScorer
+        SingleScorer
         """
         import pickle
         import pathlib
@@ -1004,7 +620,7 @@ class CommitmentScorer:
         # Ensure _needs_refit exists for pickles from older versions
         if not hasattr(scorer, "_needs_refit"):
             scorer._needs_refit = False
-        print(f"[scCS] CommitmentScorer state loaded from '{path}'.")
+        print(f"[scCS] SingleScorer state loaded from '{path}'.")
         return scorer
 
     # ------------------------------------------------------------------
@@ -1044,9 +660,6 @@ class CommitmentScorer:
     def plot_nn_entropy_elbow(self, **kwargs):
         """Elbow plots for choosing k_nn for NN-smoothed entropy.
 
-        Sweeps k_nn values and plots mean NN entropy (all cells) and per fate.
-        Call after fit().  Requires no prior score() call.
-
         Parameters
         ----------
         k_nn_range : list or range, optional
@@ -1070,9 +683,6 @@ class CommitmentScorer:
         n_top_genes: int = 50,
     ) -> dict:
         """Rank genes by mean scVelo velocity in each fate arm.
-
-        Requires the 'velocity' layer in adata_sub (from scVelo pipeline).
-        High positive velocity = gene is being upregulated along that fate.
 
         Parameters
         ----------
@@ -1103,11 +713,8 @@ class CommitmentScorer:
         Parameters
         ----------
         n_top_genes : int
-            Number of top significant DEGs to print per fate.
         pval_threshold : float
-            Adjusted p-value threshold for significance.
         logfc_threshold : float
-            Minimum absolute log fold-change for significance.
 
         Returns
         -------
@@ -1124,7 +731,6 @@ class CommitmentScorer:
             logfc_threshold=logfc_threshold,
         )
 
-
     def get_velocity_fate_drivers(
         self,
         result: CommitmentScoreResult,
@@ -1133,23 +739,12 @@ class CommitmentScorer:
     ) -> dict:
         """Identify driver genes by correlating gene velocity with fate affinity.
 
-        For each fate arm, computes the Spearman correlation between each
-        gene's velocity and the cell's fate affinity score.  Genes with high
-        positive Spearman r are being upregulated specifically as cells commit
-        to that fate — a stronger signal than mean velocity alone.
-
-        Requires:
-        - 'velocity' layer in adata_sub (from scVelo pipeline)
-        - result.cell_scores is not None (run score(cell_level=True))
-
         Parameters
         ----------
         result : CommitmentScoreResult
             Output of scorer.score(cell_level=True).
         n_top_genes : int
-            Number of top driver genes to print per fate.
         pval_threshold : float
-            FDR-adjusted p-value threshold for significance.
 
         Returns
         -------
@@ -1184,24 +779,16 @@ class CommitmentScorer:
     ) -> dict:
         """Run pathway enrichment on DEG driver genes per fate arm.
 
-        Runs Enrichr ORA on up- and down-regulated DEGs separately for
-        each fate arm.  Default gene sets: KEGG_2019_Mouse,
-        GO_Biological_Process_2021, Reactome_2022.
-
         Parameters
         ----------
         deg_drivers : dict
             Output of get_deg_drivers().
         gene_sets : list of str, optional
-            Enrichr gene set libraries.  Defaults to mouse KEGG + GO BP + Reactome.
         organism : str
-            'mouse' or 'human'.
         pval_threshold : float
         logfc_threshold : float
         plot : bool
-            If True, generate dot plots per fate per direction.
         n_top_pathways : int
-            Number of top enriched terms to plot.
 
         Returns
         -------
@@ -1217,4 +804,25 @@ class CommitmentScorer:
             logfc_threshold=logfc_threshold,
             plot=plot,
             n_top_pathways=n_top_pathways,
+        )
+
+    # ------------------------------------------------------------------
+    # Representation
+    # ------------------------------------------------------------------
+
+    def __repr__(self) -> str:
+        if self._fitted:
+            status = "fitted"
+        elif self._needs_refit:
+            status = "needs refit (embedding rebuilt)"
+        elif self._embedding_built:
+            status = "embedding built"
+        else:
+            status = "uninitialised"
+        return (
+            f"SingleScorer("
+            f"root='{self.root}', "
+            f"branches={self.branches}, "
+            f"k={len(self.branches)}, "
+            f"status='{status}')"
         )

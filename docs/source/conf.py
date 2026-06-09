@@ -4,8 +4,8 @@ sys.path.insert(0, os.path.abspath("../.."))
 
 project = "scCS"
 author = "Emil Kriukov"
-version = "0.6.2"
-release = "0.6.2"
+version = "0.7.4"
+release = "0.7.4"
 copyright = "2026, Emil Kriukov"
 html_logo = "_static/logo.png"
 extensions = [
@@ -13,6 +13,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.autosummary",
+    "sphinx.ext.mathjax",
     "autoapi.extension",
     "nbsphinx",             
 ]

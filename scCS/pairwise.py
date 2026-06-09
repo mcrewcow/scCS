@@ -1,8 +1,8 @@
 """
-multiconditional.py — Multi-condition commitment score analysis for scCS.
+pairwise.py — PairScorer: pairwise condition comparison for scCS.
 
-Extends the single-condition CommitmentScorer to handle 2 or more experimental
-conditions (e.g., treatment vs. control, multiple time points, genotypes).
+Extends the single-condition SingleScorer to handle exactly 2 experimental
+conditions (e.g., treatment vs. control, mutant vs. wild-type).
 
 Key design principle: shared embedding
 ---------------------------------------
@@ -12,49 +12,42 @@ angles would differ and CS values would not be comparable across conditions.
 
 Architecture
 ------------
-MultiConditionScorer
-    Wraps CommitmentScorer.  Pools all conditions for embedding, then scores
+PairScorer
+    Wraps SingleScorer.  Pools both conditions for embedding, then scores
     each condition separately using cell masks on the shared embedding.
 
-Tier 1 — Core multi-condition API
+Tier 1 — Core pairwise API
     score_all_conditions()          : dict[condition -> CommitmentScoreResult]
-    score_per_condition()           : alias with pseudotime-aware options
 
 Tier 2 — Statistical comparison
-    compare_conditions()            : permutation test (k=2) or Kruskal-Wallis
-                                      + pairwise Mann-Whitney (k>2) on per-cell
-                                      fate affinity scores
+    compare_conditions()            : permutation test on per-cell fate affinity
     compute_delta_CS()              : ΔCS = nCS_A − nCS_B with bootstrap CI
     plot_affinity_distributions()   : violin/box plots of per-cell affinities
-                                      split by condition, one panel per fate
 
 Tier 3 — Advanced
     fit_mixed_model()               : linear mixed-effects model on per-cell
-                                      fate affinity scores (condition fixed,
-                                      sample_id random) via statsmodels MixedLM
+                                      fate affinity scores via statsmodels MixedLM
     trajectory_shift()              : KS test + Wasserstein distance on
                                       pseudotime distributions per fate arm
-                                      across conditions
     plot_trajectory_shift()         : visualization of pseudotime distributions
-                                      per condition per fate arm
 
 Usage
 -----
->>> mscorer = scCS.MultiConditionScorer(
+>>> pscorer = scCS.PairScorer(
 ...     adata,
 ...     root='17',
 ...     branches=['homeostatic', 'activated'],
 ...     condition_obs_key='treatment',
 ...     obs_key='leiden',
 ... )
->>> mscorer.build_embedding(ordering_metric='pseudotime')
->>> mscorer.fit()
->>> results = mscorer.score_all_conditions()
->>> delta = mscorer.compute_delta_CS('control', 'treated')
->>> stats = mscorer.compare_conditions(results)
->>> mscorer.plot_affinity_distributions(results)
->>> shift = mscorer.trajectory_shift(results)
->>> mscorer.plot_trajectory_shift(shift)
+>>> pscorer.build_embedding(ordering_metric='pseudotime')
+>>> pscorer.fit()
+>>> results = pscorer.score_all_conditions()
+>>> delta = pscorer.compute_delta_CS('control', 'treated')
+>>> stats = pscorer.compare_conditions(results)
+>>> pscorer.plot_affinity_distributions(results)
+>>> shift = pscorer.trajectory_shift(results)
+>>> pscorer.plot_trajectory_shift(shift)
 """
 
 from __future__ import annotations
@@ -66,7 +59,7 @@ import matplotlib.figure
 import numpy as np
 import pandas as pd
 
-from .trajectory import CommitmentScorer
+from .single import SingleScorer
 from .scores import (
     CommitmentScoreResult,
     bootstrap_cs,
@@ -88,26 +81,27 @@ from .plot import _fate_colors, _condition_colors, CONDITION_PALETTE
 
 
 # ---------------------------------------------------------------------------
-# MultiConditionScorer
+# PairScorer
 # ---------------------------------------------------------------------------
 
-class MultiConditionScorer:
-    """RNA velocity commitment scorer for multi-condition experiments.
+class PairScorer:
+    """RNA velocity commitment scorer for pairwise (2-condition) experiments.
 
-    Builds a SHARED star embedding on the pooled data from all conditions,
+    Builds a SHARED star embedding on the pooled data from both conditions,
     then scores each condition separately.  This ensures arm geometry is
     identical across conditions, making CS values directly comparable.
 
     Parameters
     ----------
     adata : AnnData
-        Full single-cell dataset containing all conditions.
+        Full single-cell dataset containing both conditions.
     root : str
         Label of the progenitor/root cluster in adata.obs[obs_key].
     branches : list of str
         Labels of the k terminal fate clusters.
     condition_obs_key : str
         Column in adata.obs with condition labels (e.g., 'treatment').
+        Must contain exactly 2 unique values.
     obs_key : str
         Column in adata.obs with cluster labels.  Default: 'leiden'.
     n_angle_bins : int
@@ -117,20 +111,26 @@ class MultiConditionScorer:
     copy : bool
         Work on a copy of adata.
 
+    Raises
+    ------
+    ValueError
+        If condition_obs_key has fewer or more than 2 unique values.
+        For 3+ conditions, use MultiScorer instead.
+
     Examples
     --------
-    >>> mscorer = MultiConditionScorer(
+    >>> pscorer = PairScorer(
     ...     adata,
     ...     root='17',
     ...     branches=['homeostatic', 'activated'],
     ...     condition_obs_key='treatment',
     ...     obs_key='leiden',
     ... )
-    >>> mscorer.build_embedding(ordering_metric='pseudotime')
-    >>> mscorer.fit()
-    >>> results = mscorer.score_all_conditions()
-    >>> delta = mscorer.compute_delta_CS('control', 'treated')
-    >>> stats = mscorer.compare_conditions(results)
+    >>> pscorer.build_embedding(ordering_metric='pseudotime')
+    >>> pscorer.fit()
+    >>> results = pscorer.score_all_conditions()
+    >>> delta = pscorer.compute_delta_CS('control', 'treated')
+    >>> stats = pscorer.compare_conditions(results)
     """
 
     def __init__(
@@ -159,25 +159,30 @@ class MultiConditionScorer:
                 f"Available columns: {list(adata.obs.columns)}"
             )
         self.conditions = sorted(adata.obs[condition_obs_key].astype(str).unique().tolist())
-        if len(self.conditions) < 2:
+
+        # Validate exactly 2 conditions
+        if len(self.conditions) != 2:
             raise ValueError(
-                f"condition_obs_key='{condition_obs_key}' has only {len(self.conditions)} "
-                "unique value(s).  Need at least 2 conditions."
+                f"PairScorer requires exactly 2 conditions, but "
+                f"condition_obs_key='{condition_obs_key}' has {len(self.conditions)} "
+                f"unique value(s): {self.conditions}. "
+                + ("Use SingleScorer for single-condition analysis. " if len(self.conditions) == 1
+                   else "Use MultiScorer for 3+ conditions. ")
             )
 
-        # Internal CommitmentScorer built on pooled data
-        self._scorer: Optional[CommitmentScorer] = None
+        # Internal SingleScorer built on pooled data
+        self._scorer: Optional[SingleScorer] = None
         self._fitted = False
 
         print(
-            f"[scCS] MultiConditionScorer initialized.\n"
+            f"[scCS] PairScorer initialized.\n"
             f"       Conditions ({len(self.conditions)}): {self.conditions}\n"
             f"       Root: '{root}', "
             f"Branches: {branches}"
         )
 
     # ------------------------------------------------------------------
-    # Step 1: Build shared embedding (delegates to CommitmentScorer)
+    # Step 1: Build shared embedding (delegates to SingleScorer)
     # ------------------------------------------------------------------
 
     def build_embedding(
@@ -188,20 +193,20 @@ class MultiConditionScorer:
         arm_scale: float = 10.0,
         jitter: float = 0.3,
         seed: int = 42,
+        arm_norm: str = "global",
         verbose: bool = True,
-    ) -> "MultiConditionScorer":
-        """Build the shared star embedding on pooled data from all conditions.
+    ) -> "PairScorer":
+        """Build the shared star embedding on pooled data from both conditions.
 
-        The embedding is built on ALL cells (all conditions pooled), ensuring
+        The embedding is built on ALL cells (both conditions pooled), ensuring
         that arm geometry is identical across conditions.
 
         Parameters
         ----------
         ordering_metric : str or np.ndarray
-            See CommitmentScorer.build_embedding().
+            See SingleScorer.build_embedding().
         invert_ordering : bool
         scale_ordering : bool
-            Min-max scale the metric to [0, 1] before embedding.
         arm_scale : float
         jitter : float
         seed : int
@@ -217,7 +222,7 @@ class MultiConditionScorer:
                 f"({self.adata.n_obs} cells, {len(self.conditions)} conditions)..."
             )
 
-        self._scorer = CommitmentScorer(
+        self._scorer = SingleScorer(
             self.adata,
             root=self.root,
             branches=self.branches,
@@ -233,6 +238,7 @@ class MultiConditionScorer:
             arm_scale=arm_scale,
             jitter=jitter,
             seed=seed,
+            arm_norm=arm_norm,
             verbose=verbose,
         )
         return self
@@ -243,11 +249,12 @@ class MultiConditionScorer:
         arm_scale: float = 10.0,
         jitter: float = 0.3,
         seed: int = 42,
+        arm_norm: str = "global",
         verbose: bool = True,
-    ) -> "MultiConditionScorer":
+    ) -> "PairScorer":
         """Rebuild the shared embedding using subset-local pseudotime.
 
-        See CommitmentScorer.refit_pseudotime().
+        See SingleScorer.refit_pseudotime().
         """
         self._check_embedding()
         self._scorer.refit_pseudotime(
@@ -255,16 +262,17 @@ class MultiConditionScorer:
             arm_scale=arm_scale,
             jitter=jitter,
             seed=seed,
+            arm_norm=arm_norm,
             verbose=verbose,
         )
         self._fitted = False
         return self
 
     # ------------------------------------------------------------------
-    # Step 2: Fit (delegates to CommitmentScorer)
+    # Step 2: Fit (delegates to SingleScorer)
     # ------------------------------------------------------------------
 
-    def fit(self, verbose: bool = True) -> "MultiConditionScorer":
+    def fit(self, verbose: bool = True) -> "PairScorer":
         """Fit the shared FateMap and project velocity.
 
         Must be called after build_embedding().
@@ -343,8 +351,6 @@ class MultiConditionScorer:
             )
 
         return results
-
-    # score_per_condition() removed in v0.6.1 — use score_all_conditions() directly.
 
     # ------------------------------------------------------------------
     # Tier 2: Statistical comparison
@@ -508,7 +514,7 @@ class MultiConditionScorer:
     def compare_conditions(
         self,
         results: Dict[str, CommitmentScoreResult],
-        test: Literal["permutation", "kruskal"] = "auto",
+        test: Literal["permutation", "kruskal"] = "permutation",
         n_permutations: int = 1000,
         pval_threshold: float = 0.05,
         seed: int = 42,
@@ -516,22 +522,16 @@ class MultiConditionScorer:
     ) -> pd.DataFrame:
         """Statistical comparison of per-cell fate affinity scores across conditions.
 
-        For k=2 conditions: permutation test (shuffle condition labels, recompute
-        mean per-cell affinity difference, get empirical null distribution).
-
-        For k>2 conditions: Kruskal-Wallis test across all conditions, followed
-        by pairwise Mann-Whitney U tests with Bonferroni correction.
-
-        Both tests operate on per-cell fate affinity scores (``cell_scores``),
-        which are more statistically powerful than comparing scalar CS values.
+        For PairScorer (k=2 conditions), the default test is a permutation test:
+        shuffle condition labels, recompute mean per-cell affinity difference,
+        and get an empirical null distribution.
 
         Parameters
         ----------
         results : dict
             Output of score_all_conditions() with cell_level=True.
-        test : {'auto', 'permutation', 'kruskal'}
-            Statistical test to use.  'auto' selects permutation for k=2
-            and kruskal for k>2.
+        test : {'permutation', 'kruskal'}
+            Statistical test to use.  Default: 'permutation' (recommended for k=2).
         n_permutations : int
             Number of permutations for the permutation test.  Default 1000.
         pval_threshold : float
@@ -556,18 +556,13 @@ class MultiConditionScorer:
                 )
 
         fate_names = list(results.values())[0].fate_names
-        k_cond = len(results)
-
-        if test == "auto":
-            test = "permutation" if k_cond == 2 else "kruskal"
+        cond_a, cond_b = list(results.keys())
+        scores_a = results[cond_a].cell_scores
+        scores_b = results[cond_b].cell_scores
 
         rows = []
 
-        if test == "permutation" and k_cond == 2:
-            cond_a, cond_b = list(results.keys())
-            scores_a = results[cond_a].cell_scores  # (n_a, k_fates)
-            scores_b = results[cond_b].cell_scores  # (n_b, k_fates)
-
+        if test == "permutation":
             rng = np.random.default_rng(seed)
 
             for j, fate in enumerate(fate_names):
@@ -599,61 +594,31 @@ class MultiConditionScorer:
             df["pval_adj"] = np.minimum(df["pval"] * len(fate_names), 1.0)
             df["significant"] = df["pval_adj"] < pval_threshold
 
-        else:
-            # Kruskal-Wallis + pairwise Mann-Whitney
+        else:  # kruskal
             from scipy.stats import kruskal, mannwhitneyu
-            from itertools import combinations
-
-            cond_list = list(results.keys())
-            all_scores = {c: results[c].cell_scores for c in cond_list}
 
             for j, fate in enumerate(fate_names):
-                groups = [all_scores[c][:, j] for c in cond_list]
+                a_vals = scores_a[:, j]
+                b_vals = scores_b[:, j]
 
-                # Kruskal-Wallis
+                # Kruskal-Wallis (equivalent to Mann-Whitney for k=2)
                 try:
-                    stat_kw, pval_kw = kruskal(*groups)
+                    stat_kw, pval_kw = kruskal(a_vals, b_vals)
                 except Exception:
                     stat_kw, pval_kw = np.nan, np.nan
 
                 rows.append({
                     "fate": fate,
-                    "comparison": "all",
+                    "comparison": f"{cond_a} vs {cond_b}",
                     "test": "kruskal-wallis",
                     "statistic": float(stat_kw),
                     "pval": float(pval_kw),
-                    "mean_A": np.nan,
-                    "mean_B": np.nan,
+                    "mean_A": float(a_vals.mean()),
+                    "mean_B": float(b_vals.mean()),
                 })
 
-                # Pairwise Mann-Whitney
-                for ca, cb in combinations(cond_list, 2):
-                    try:
-                        stat_mw, pval_mw = mannwhitneyu(
-                            all_scores[ca][:, j],
-                            all_scores[cb][:, j],
-                            alternative="two-sided",
-                        )
-                    except Exception:
-                        stat_mw, pval_mw = np.nan, np.nan
-
-                    rows.append({
-                        "fate": fate,
-                        "comparison": f"{ca} vs {cb}",
-                        "test": "mann-whitney",
-                        "statistic": float(stat_mw),
-                        "pval": float(pval_mw),
-                        "mean_A": float(all_scores[ca][:, j].mean()),
-                        "mean_B": float(all_scores[cb][:, j].mean()),
-                    })
-
             df = pd.DataFrame(rows)
-            # Bonferroni correction within each test type
-            for test_type in df["test"].unique():
-                mask = df["test"] == test_type
-                df.loc[mask, "pval_adj"] = np.minimum(
-                    df.loc[mask, "pval"] * mask.sum(), 1.0
-                )
+            df["pval_adj"] = np.minimum(df["pval"] * len(fate_names), 1.0)
             df["significant"] = df["pval_adj"] < pval_threshold
 
         if verbose:
@@ -679,8 +644,7 @@ class MultiConditionScorer:
         """Violin/box plots of per-cell fate affinity scores by condition.
 
         One panel per fate, showing the distribution of per-cell affinity
-        scores split by condition.  This is more informative than comparing
-        scalar CS values because it shows the full distribution.
+        scores split by condition.
 
         Parameters
         ----------
@@ -788,9 +752,7 @@ class MultiConditionScorer:
         """Linear mixed-effects model on per-cell fate affinity scores.
 
         Models per-cell fate affinity as a function of condition (fixed effect)
-        with optional sample/replicate as a random effect.  This is the
-        statistically correct approach when you have multiple biological
-        replicates per condition.
+        with optional sample/replicate as a random effect.
 
         Model (per fate j):
             affinity_ij ~ condition_i + (1 | sample_id_i)
@@ -803,11 +765,8 @@ class MultiConditionScorer:
             Output of score_all_conditions(cell_level=True).
         replicate_key : str, optional
             Column in adata_sub.obs with sample/replicate IDs.
-            If None, each cell is treated as its own replicate (no random
-            effect — equivalent to a simple linear model).
         ref_condition : str, optional
-            Reference condition for the fixed effect.  Defaults to the
-            first condition alphabetically.
+            Reference condition for the fixed effect.
         verbose : bool
 
         Returns
@@ -852,7 +811,7 @@ class MultiConditionScorer:
                         else "unknown"
                     )
                 else:
-                    row["sample_id"] = obs_name  # each cell = own group (no random effect)
+                    row["sample_id"] = obs_name
                 rows.append(row)
 
         df_long = pd.DataFrame(rows)
@@ -872,7 +831,6 @@ class MultiConditionScorer:
 
             try:
                 if replicate_key is not None:
-                    # Mixed model with random intercept per sample
                     model = smf.mixedlm(
                         f"{col} ~ C(condition)",
                         data=df_long,
@@ -880,14 +838,12 @@ class MultiConditionScorer:
                     )
                     fit = model.fit(reml=True, method="lbfgs")
                 else:
-                    # OLS (no random effect)
                     model = smf.ols(f"{col} ~ C(condition)", data=df_long)
                     fit = model.fit()
 
                 for param_name in fit.params.index:
                     if "condition" not in param_name:
                         continue
-                    # Extract condition label from parameter name
                     cond_label = (
                         param_name
                         .replace(f"C(condition)[T.", "")
@@ -917,7 +873,6 @@ class MultiConditionScorer:
             return pd.DataFrame()
 
         result_df = pd.DataFrame(all_rows)
-        # Bonferroni correction
         result_df["pval_adj"] = np.minimum(result_df["pval"] * len(result_df), 1.0)
         result_df["significant"] = result_df["pval_adj"] < 0.05
         result_df = result_df.sort_values(["fate", "pval_adj"]).reset_index(drop=True)
@@ -948,13 +903,10 @@ class MultiConditionScorer:
     ) -> pd.DataFrame:
         """Test whether pseudotime distributions differ across conditions per fate arm.
 
-        For each fate arm and each pair of conditions, computes:
+        For each fate arm, computes:
         - Kolmogorov-Smirnov (KS) statistic and p-value
         - Wasserstein distance (Earth Mover's Distance)
         - Bootstrap CI on the Wasserstein distance
-
-        A significant KS test or large Wasserstein distance indicates that
-        cells commit earlier or later under one condition vs. another.
 
         Parameters
         ----------
@@ -962,8 +914,6 @@ class MultiConditionScorer:
             Output of score_all_conditions().
         pseudotime_key : str
             Column in adata_sub.obs with pseudotime values.
-            Defaults to 'sccs_pseudotime' (subset-local pseudotime).
-            Falls back to 'velocity_pseudotime' if not found.
         n_bootstrap : int
             Bootstrap replicates for Wasserstein CI.  Default 500.
         seed : int
@@ -993,14 +943,14 @@ class MultiConditionScorer:
             if fallback in self._scorer.adata_sub.obs:
                 warnings.warn(
                     f"'{pseudotime_key}' not found. Using '{fallback}'. "
-                    "Run recompute_subset_pseudotime() for better results.",
+                    "Run compute_local_pseudotime() for better results.",
                     stacklevel=2,
                 )
                 pseudotime_key = fallback
             else:
                 raise ValueError(
                     f"Neither '{pseudotime_key}' nor 'velocity_pseudotime' found "
-                    "in adata_sub.obs. Run recompute_subset_pseudotime() first."
+                    "in adata_sub.obs. Run compute_local_pseudotime() first."
                 )
 
         pt_all = np.array(
@@ -1010,13 +960,12 @@ class MultiConditionScorer:
         cond_labels = self._scorer.adata_sub.obs[self.condition_obs_key].astype(str).values
 
         rng = np.random.default_rng(seed)
-        from itertools import combinations
 
         rows = []
         for fate in fate_names:
             fate_mask = cluster_labels == str(fate)
 
-            for ca, cb in combinations(conditions, 2):
+            for ca, cb in [(conditions[0], conditions[1])]:
                 mask_a = fate_mask & (cond_labels == ca)
                 mask_b = fate_mask & (cond_labels == cb)
 
@@ -1066,7 +1015,6 @@ class MultiConditionScorer:
             return pd.DataFrame()
 
         df = pd.DataFrame(rows)
-        # Bonferroni correction on KS p-values
         df["ks_pval_adj"] = np.minimum(df["ks_pval"] * len(df), 1.0)
         df["significant"] = df["ks_pval_adj"] < 0.05
         df = df.sort_values(["fate", "ks_pval_adj"]).reset_index(drop=True)
@@ -1096,19 +1044,15 @@ class MultiConditionScorer:
     ) -> matplotlib.figure.Figure:
         """Visualize pseudotime distributions per condition per fate arm.
 
-        Produces a grid of KDE plots: one row per fate arm, one column per
-        pairwise comparison.  Overlaid KDEs show how pseudotime distributions
-        shift between conditions.  Wasserstein distance and KS p-value are
-        annotated on each panel.
+        Produces a grid of KDE plots: one row per fate arm.
+        Overlaid KDEs show how pseudotime distributions shift between conditions.
 
         Parameters
         ----------
         shift_df : pd.DataFrame
             Output of trajectory_shift().
         pseudotime_key : str
-            Column in adata_sub.obs with pseudotime values.
         color_map : dict, optional
-            condition_label -> hex color.
         figsize : tuple, optional
         title : str, optional
         save_path : str, optional
@@ -1132,61 +1076,52 @@ class MultiConditionScorer:
         cond_labels = self._scorer.adata_sub.obs[self.condition_obs_key].astype(str).values
 
         fate_names = shift_df["fate"].unique().tolist()
-        comparisons = shift_df["comparison"].unique().tolist()
 
         if color_map is None:
             color_map = _condition_colors(self.conditions)
 
         n_fates = len(fate_names)
-        n_comps = len(comparisons)
         if figsize is None:
-            figsize = (n_comps * 4.0, n_fates * 3.0)
+            figsize = (5.0, n_fates * 3.0)
 
         sns.set_theme(style="ticks")
-        fig, axes = plt.subplots(
-            n_fates, n_comps,
-            figsize=figsize,
-            squeeze=False,
-        )
+        fig, axes = plt.subplots(n_fates, 1, figsize=figsize, squeeze=False)
 
         for fi, fate in enumerate(fate_names):
+            ax = axes[fi][0]
             fate_mask = cluster_labels == str(fate)
-            for ci, comp in enumerate(comparisons):
-                ax = axes[fi][ci]
-                row = shift_df[
-                    (shift_df["fate"] == fate) & (shift_df["comparison"] == comp)
-                ]
-                if row.empty:
-                    ax.set_visible(False)
-                    continue
+            row = shift_df[shift_df["fate"] == fate]
+            if row.empty:
+                ax.set_visible(False)
+                continue
 
-                ca = row["condition_a"].values[0]
-                cb = row["condition_b"].values[0]
+            ca = row["condition_a"].values[0]
+            cb = row["condition_b"].values[0]
 
-                pt_a = pt_all[fate_mask & (cond_labels == ca)]
-                pt_b = pt_all[fate_mask & (cond_labels == cb)]
+            pt_a = pt_all[fate_mask & (cond_labels == ca)]
+            pt_b = pt_all[fate_mask & (cond_labels == cb)]
 
-                sns.kdeplot(
-                    pt_a, ax=ax, color=color_map.get(ca, "#0072B2"),
-                    fill=True, alpha=0.35, label=ca, linewidth=1.5,
-                )
-                sns.kdeplot(
-                    pt_b, ax=ax, color=color_map.get(cb, "#D55E00"),
-                    fill=True, alpha=0.35, label=cb, linewidth=1.5,
-                )
+            sns.kdeplot(
+                pt_a, ax=ax, color=color_map.get(ca, "#0072B2"),
+                fill=True, alpha=0.35, label=ca, linewidth=1.5,
+            )
+            sns.kdeplot(
+                pt_b, ax=ax, color=color_map.get(cb, "#D55E00"),
+                fill=True, alpha=0.35, label=cb, linewidth=1.5,
+            )
 
-                ks_p = row["ks_pval_adj"].values[0]
-                w = row["wasserstein"].values[0]
-                sig_str = "*" if ks_p < 0.05 else "ns"
-                ax.set_title(
-                    f"{fate}\nW={w:.3f}  KS p={ks_p:.3f} {sig_str}",
-                    fontsize=9,
-                )
-                ax.set_xlabel("Pseudotime", fontsize=8)
-                ax.set_ylabel("Density" if ci == 0 else "", fontsize=8)
-                if fi == 0 and ci == 0:
-                    ax.legend(fontsize=7, frameon=False)
-                sns.despine(ax=ax)
+            ks_p = row["ks_pval_adj"].values[0]
+            w = row["wasserstein"].values[0]
+            sig_str = "*" if ks_p < 0.05 else "ns"
+            ax.set_title(
+                f"{fate}  —  W={w:.3f}  KS p={ks_p:.3f} {sig_str}",
+                fontsize=10,
+            )
+            ax.set_xlabel("Pseudotime", fontsize=8)
+            ax.set_ylabel("Density", fontsize=8)
+            if fi == 0:
+                ax.legend(fontsize=7, frameon=False)
+            sns.despine(ax=ax)
 
         fig.suptitle(
             title or "Trajectory shift: pseudotime distributions by condition",
@@ -1210,7 +1145,7 @@ class MultiConditionScorer:
     ) -> None:
         """Transfer per-cell commitment scores to the full adata for all conditions.
 
-        Calls CommitmentScorer.transfer_labels() for each condition's result,
+        Calls SingleScorer.transfer_labels() for each condition's result,
         writing condition-specific columns to adata.obs.
 
         Parameters
@@ -1249,7 +1184,6 @@ class MultiConditionScorer:
         ----------
         results : dict
         color_map : dict, optional
-            fate_name -> hex color (for fate coloring, not condition).
         figsize_per_panel : tuple
         save_path : str, optional
 
@@ -1284,7 +1218,6 @@ class MultiConditionScorer:
             fig.savefig(save_path, dpi=300, bbox_inches="tight")
         return fig
 
-
     def plot_rose_grid(
         self,
         results: Dict[str, CommitmentScoreResult],
@@ -1301,9 +1234,7 @@ class MultiConditionScorer:
         Parameters
         ----------
         results : dict
-            Output of score_all_conditions().
         color_map : dict, optional
-            fate_name -> hex color.
         figsize_per_panel : tuple
         title : str, optional
         save_path : str, optional
@@ -1320,7 +1251,6 @@ class MultiConditionScorer:
             title=title,
             save_path=save_path,
         )
-
 
     def plot_delta_cs_heatmap(self, delta_result: dict, **kwargs) -> matplotlib.figure.Figure:
         """Heatmap of ΔCS = nCS_A − nCS_B with CI annotation.
@@ -1389,10 +1319,10 @@ class MultiConditionScorer:
         status = "fitted" if self._fitted else "uninitialised"
         n_cond = len(self.conditions)
         return (
-            f"MultiConditionScorer("
+            f"PairScorer("
             f"root='{self.root}', "
             f"branches={self.branches}, "
-            f"conditions={self.conditions} (n={n_cond}), "
+            f"conditions={self.conditions}, "
             f"status='{status}')"
         )
 
@@ -1401,13 +1331,13 @@ class MultiConditionScorer:
     # ------------------------------------------------------------------
 
     @property
-    def scorer(self) -> Optional[CommitmentScorer]:
-        """The underlying shared CommitmentScorer."""
+    def scorer(self) -> Optional[SingleScorer]:
+        """The internal SingleScorer used for embedding and scoring."""
         return self._scorer
 
     @property
     def adata_sub(self):
-        """The shared embedding subset AnnData."""
+        """The embedding subset (from the internal SingleScorer)."""
         if self._scorer is not None:
             return self._scorer.adata_sub
         return None
@@ -1416,18 +1346,14 @@ class MultiConditionScorer:
     def is_fitted(self) -> bool:
         return self._fitted
 
-    # ------------------------------------------------------------------
-    # Internal checks
-    # ------------------------------------------------------------------
-
     def _check_embedding(self):
         if self._scorer is None or not self._scorer._embedding_built:
             raise RuntimeError(
-                "Shared embedding not built. Call build_embedding() first."
+                "Star embedding not built. Call build_embedding() first."
             )
 
     def _check_fitted(self):
         if not self._fitted:
             raise RuntimeError(
-                "MultiConditionScorer not fitted. Call fit() first."
+                "PairScorer is not fitted. Call fit() first."
             )

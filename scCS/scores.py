@@ -788,12 +788,12 @@ class CommitmentScoreResult:
     mean_cell_entropy : float
         Mean normalized per-cell Shannon entropy in [0, 1].
         See :func:`compute_mean_cell_entropy`.
-        NaN when compute_cell_level=False.
+        NaN when cell_level=False.
     per_fate_entropy : np.ndarray, shape (k,)
         Mean binary cell entropy for each fate individually.
         per_fate_entropy[j] = mean over cells of H_bin(s_ij, 1-s_ij).
         See :func:`compute_per_fate_cell_entropy`.
-        All-NaN array when compute_cell_level=False.
+        All-NaN array when cell_level=False.
     pairwise_unCS : np.ndarray, shape (k, k)
     pairwise_nCS : np.ndarray, shape (k, k)
     cell_scores : np.ndarray, shape (n_cells, k), optional
@@ -886,7 +886,7 @@ class CommitmentScoreResult:
                 lines.append(f"      {name}: {h:.4f}")
         else:
             lines.append(
-                "    Mean cell entropy:            [not computed — set compute_cell_level=True]"
+                "    Mean cell entropy:            [not computed — set cell_level=True]"
             )
         if self.nn_cell_entropy is not None:
             lines.append(

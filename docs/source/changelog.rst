@@ -1,6 +1,400 @@
 Changelog
 =========
 
+v0.7.4 (2026-06-08)
+-------------------
+
+**Fixed**
+
+- ``scCS.embedding.build_star_embedding`` — the ``(s_min, s_max)`` range
+  used to map the ordering metric onto each arm is now computed from
+  **fate cells only**, excluding the bifurcation/progenitor cells.
+  Previously the range was taken across ``fate_mask | bif_mask`` in
+  per-arm mode (and across the whole subset in global mode), which let
+  bifurcation cells — typically clustered at the low end of the
+  pseudotime — push the lower edge of the rescale interval down and
+  shift the closest fate cell off the origin. After this fix, the
+  earliest fate cell on each arm (per-arm mode) or the earliest fate
+  cell anywhere in the subset (global mode) sits at radius ≈ 0, which
+  matches the published star-plot semantics. Bifurcation cells continue
+  to be clustered tightly around the origin via the separate
+  jitter-around-origin logic and are unaffected by this change.
+
+  *Visible effect on real data*: on the pancreas tutorial subset
+  (Pre-endocrine → Alpha/Beta/Delta/Epsilon), v0.7.3 placed every fate
+  cluster at least 2.7 radial units away from the origin even with
+  ``arm_norm="per_arm"``; v0.7.4 places the earliest fate cell on each
+  arm within ~0.5 units of origin in per-arm mode and within ~0.05
+  units of origin for the global-min fate (Delta) in global mode.
+
+  Multi-condition embeddings (``PairScorer`` / ``MultiScorer``) share
+  one rescale across the full subset, then each condition panel in
+  ``plot_star_grid`` shows only that condition's cells. If a
+  particular condition does **not** contain the cell with the
+  global-min pseudotime, its panel will show all arms starting
+  slightly off origin — this is the intended behavior for global
+  rescale and reflects the biological fact that the condition is
+  enriched in later-pseudotime cells. Use ``arm_norm="per_arm"`` if
+  you instead want every condition's earliest cells to land at
+  origin (at the cost of losing inter-condition timing comparison).
+
+- All three tutorials — the ``sc.pp.highly_variable_genes`` fallback in
+  the scvelo HVG path now uses ``flavor="cell_ranger"`` instead of the
+  default ``flavor="seurat"``. The seurat flavor passes an integer
+  ``n_bins`` to ``pandas.cut`` on the log-dispersion vector, which
+  rejects integer bin counts when the input contains ``±inf`` from
+  pandas 2.2 onward. Genes with zero mean expression produce
+  ``-inf`` log-dispersions and trigger this error on Python 3.12
+  + pandas ≥ 2.2 environments. The ``cell_ranger`` flavor uses explicit
+  bin edges that already include ``±inf`` and is robust across pandas
+  versions. The IF-branch (``scv.pp.filter_and_normalize`` with
+  ``n_top_genes=2000``) is unchanged and still preferred when the
+  installed scvelo supports it.
+
+**Tests**
+
+- Added ``tests/test_v074_fate_only_rescale.py`` (+6 tests):
+
+  - ``TestPerArmFateOnly`` — every fate's closest cell touches origin
+    in ``arm_norm="per_arm"`` mode; bifurcation cells remain near
+    origin (regression test for the inner cluster).
+  - ``TestGlobalFateOnly`` — at least one fate touches origin in
+    ``arm_norm="global"`` mode (the fate containing the global-min
+    pseudotime cell); the longest-range fate reaches ``arm_scale``;
+    explicit regression check against the v0.7.3 fate+bif rescale
+    behavior on a fixture where bifurcation cells are pseudotime-disjoint
+    from fate cells.
+  - ``TestScveloHvgFallbackCellRanger`` — synthetic adata with all-zero
+    genes (the failure mode for the seurat flavor on pandas ≥ 2.2)
+    successfully runs through ``flavor="cell_ranger"``.
+
+  Test count: 183 passed, 1 skipped (was 177 + 1 in v0.7.3).
+
+v0.7.3 (2026-06-08)
+-------------------
+
+**Added**
+
+- ``arm_norm`` keyword on ``scCS.embedding.build_star_embedding`` and on
+  ``SingleScorer.build_embedding``, ``PairScorer.build_embedding``,
+  ``MultiScorer.build_embedding``, plus the matching ``refit_pseudotime``
+  wrappers. Accepts ``"global"`` (new default) or ``"per_arm"`` (legacy
+  behavior). See *Changed* below for the rationale.
+- ``vmin`` / ``vmax`` keyword arguments on
+  ``MultiScorer.plot_omnibus_summary``. When both are ``None`` (default),
+  the colormap limits are derived from the finite values of the
+  mean-affinity matrix; pass explicit floats to pin a fixed scale across
+  figures.
+
+**Changed**
+
+- ``build_star_embedding`` now rescales the ordering metric **globally**
+  across the entire subset by default (``arm_norm="global"``). Previously
+  each arm received its own ``(s_min, s_max)`` from
+  ``fate_mask | bif_mask`` and was mapped to ``[0, arm_scale]``
+  independently, so all arms reached the full radial cap regardless of
+  the underlying pseudotime range. The new default uses one
+  ``(s_min, s_max)`` from all subset cells and applies it uniformly, so
+  arms whose cells span shorter pseudotime intervals stay visibly
+  shorter. This preserves the relative ordering of cells across arms and
+  matches the biological intuition that arm length reflects how far each
+  fate has differentiated from the progenitor on a shared scale. Pass
+  ``arm_norm="per_arm"`` to reproduce pre-v0.7.3 plots.
+- ``MultiScorer.plot_omnibus_summary`` no longer pins the mean-affinity
+  heatmap to ``[0, 1]``. The colormap now spans the realized data range
+  by default, so per-condition contrast is visible on datasets where
+  affinities cluster well below 1.0 (the previous behavior rendered
+  nearly uniform pale yellow on real data). The colorbar label includes
+  the realized ``[vmin, vmax]`` so the scale stays explicit.
+- ``scCS.enrichment.run_enrichment_per_fate`` — ``fate_names`` is now an
+  optional second argument. If omitted, fate names are inferred from
+  ``deg_drivers.keys()`` in their natural insertion order. If provided
+  but mismatched with ``deg_drivers.keys()``, a ``UserWarning`` is
+  emitted and only the intersection is used. The previous positional
+  contract is preserved for callers (including
+  ``SingleScorer.get_enrichment``) that pass it explicitly.
+
+**Fixed**
+
+- ``scCS_tutorial_pairwise.ipynb`` and ``scCS_tutorial_multi.ipynb`` —
+  ``run_enrichment_per_fate`` calls now pass ``fate_names=fate_names``
+  explicitly. Previously the missing positional argument raised
+  ``TypeError`` which was silently swallowed by the surrounding
+  ``except Exception`` clause, leaving the enrichment table empty with
+  no clear error message.
+- All three tutorials — ``scv.pp.filter_and_normalize`` is now invoked
+  through an ``inspect.signature``-based guard that uses
+  ``n_top_genes=2000`` when the installed scvelo supports the keyword,
+  and falls back to ``sc.pp.highly_variable_genes(adata, n_top_genes=2000,
+  subset=True)`` otherwise. This keeps the notebooks runnable across
+  scvelo releases where the keyword has been removed.
+
+- ``MultiScorer.plot_omnibus_summary`` layout cleanup —
+  the default figsize is widened so the colorbar label (which now
+  carries the auto-derived range) and the fate row labels render without
+  overlap or truncation, and y-tick labels are explicitly set to
+  ``rotation=0`` on both panels.
+
+**Tutorial hygiene**
+
+- Uniform warning filters added to ``scCS_tutorial_pairwise.ipynb`` and
+  ``scCS_tutorial_single.ipynb``: ``DeprecationWarning``,
+  ``FutureWarning``, and ``statsmodels.ConvergenceWarning`` are
+  suppressed. The previous blanket ``warnings.filterwarnings("ignore")``
+  in ``scCS_tutorial_multi.ipynb`` is narrowed to the same category set,
+  so ``UserWarning`` emitted by scCS itself (e.g. the
+  ``plot_expression_trends`` slice notice introduced in v0.7.2) stays
+  visible.
+
+**Tests**
+
+- Added ``tests/test_arm_norm_and_enrichment.py`` covering the new
+  ``arm_norm`` branches in ``build_star_embedding``, the
+  ``fate_names`` inference path in ``run_enrichment_per_fate``, and
+  the auto-scale defaults of ``plot_omnibus_summary``.
+
+v0.7.2 (2026-06-07)
+-------------------
+
+**Bug fixes — correctness**
+
+- ``MultiScorer.compare_omnibus``, ``MultiScorer.compare_posthoc``, and
+  ``MultiScorer.fit_mixed_model_contrasts`` previously compared identical
+  full-embedding ``cell_scores`` arrays across all conditions because
+  ``SingleScorer.score(cell_mask=...)`` returns ``cell_scores`` sized to
+  the **full** ``adata_sub`` regardless of the mask (a semantic the
+  ``transfer_labels`` pipeline depends on). The downstream multi-condition
+  consumers wrongly assumed condition-only sizing. They now correctly
+  slice ``cell_scores`` per condition via the new
+  ``MultiScorer._per_condition_cell_scores`` helper, so omnibus,
+  posthoc, and LMM analyses operate on the actual per-condition cell
+  distributions. Same fix applied to ``plot_omnibus_summary``'s
+  mean-affinity matrix and to ``plot_rose_grid``'s long-form table.
+
+- ``MultiScorer.plot_pairwise_delta_grid`` — previously called
+  ``plot_delta_cs_heatmap(delta_result, ax=ax)`` but
+  ``plot_delta_cs_heatmap`` does not accept ``ax`` (it constructs its
+  own ``Figure``). Heatmap rendering is now inlined in the grid loop so
+  the grid renders correctly. Added a ``cmap`` keyword (default
+  ``"RdBu_r"``) on the grid signature.
+
+- ``embedding._fallback_dpt`` — previously called ``sc.tl.dpt`` without
+  first running ``sc.tl.diffmap``, causing scanpy to silently use a
+  default-parameter diffmap and producing ``inf`` pseudotime values on
+  disconnected subgraph components. Now explicitly runs
+  ``sc.tl.diffmap(n_comps=15)`` (refitting neighbors on ``X_sccs`` if
+  needed) before DPT and clips any remaining non-finite values to the
+  finite range. This makes ``MultiScorer.refit_pseudotime()`` safe on
+  velocity-tertile and other split datasets.
+
+- ``embedding._fill_nan`` — generalized to handle ``±inf`` in addition
+  to ``NaN`` (positive infinities clip to the finite max, negative
+  infinities to the finite min, and NaNs to the finite median).
+
+- ``plot_expression_trends`` — now gracefully handles a common usage
+  pattern where the caller passes a condition-masked subset of the
+  scored ``adata`` together with a full-embedding
+  ``CommitmentScoreResult``. Previously this raised
+  ``KeyError: '... are not valid obs/var names or indices'`` because
+  ``result.cell_obs_names`` referenced cells outside the passed
+  ``adata``. The function now intersects ``result.cell_obs_names`` with
+  ``adata.obs_names``, slices ``cell_scores`` to keep only the
+  overlapping rows, and emits a ``UserWarning`` indicating how many
+  cells were kept. Calls using the legacy patterns (full ``adata``
+  paired with full ``result``, or a manually pre-sliced ``result``) are
+  unchanged and produce no warning.
+
+**Tutorial fixes**
+
+- ``scCS_tutorial_multi.ipynb`` — corrected several API calls that
+  broke under v0.7.1:
+
+  - ``MultiScorer.build_embedding`` now uses
+    ``ordering_metric="velocity_pseudotime"`` (the value
+    ``"pseudotime"`` is no longer accepted by the embedding builder
+    when velocity is available).
+  - ``compare_posthoc`` now passes ``pval_correction=...`` (not
+    ``correction=...``).
+  - ``plot_expression_trends`` is now called with a per-condition
+    ``CommitmentScoreResult`` constructed via ``dataclasses.replace``
+    that slices ``cell_scores`` / ``cell_obs_names`` /
+    ``nn_cell_entropy`` to the condition's mask. This works around the
+    full-embedding ``cell_scores`` sizing without breaking
+    ``transfer_labels``.
+  - ``MultiScorer.transfer_labels(results, prefix=...)`` no longer
+    takes an ``adata`` positional argument.
+  - ``MultiScorer.compute_pairwise_deltas()`` no longer takes a
+    ``results`` argument (it reads cached scores internally).
+  - Final UMAP visualization uses ``mscorer.adata`` (the scorer
+    re-exposes its working AnnData).
+  - Added a markdown caveat that the velocity-tertile split is
+    illustrative, not a real biological perturbation; fate prevalence
+    is imbalanced across tertiles.
+
+- ``scCS_tutorial_pairwise.ipynb`` — ``_driver_overlap`` helper made
+  defensive against asymmetric fate sets across conditions: uses
+  ``dict.get(fate)`` with empty-set fallback and unions fates across
+  all conditions instead of intersecting on the first one (which raised
+  ``KeyError`` when one condition had no top drivers for a given fate).
+
+- ``scCS_tutorial_single.ipynb`` — removed an unsupported
+  ``verbose=False`` keyword argument from the
+  ``scorer.get_deg_drivers(...)`` call (the method does not accept
+  ``verbose``; previously raised ``TypeError`` on first run).
+
+- All three tutorial notebooks now start with ``%matplotlib inline``
+  so that figures render correctly when the notebooks are executed
+  headlessly (``jupyter nbconvert --execute``).
+
+**Tests**
+
+- Updated 6 stale tests under ``TestPairScorerPipeline`` /
+  ``TestMultiScorerPipeline`` to match the v0.7.x APIs:
+
+  - ``test_compare_conditions_kruskal_path`` skipped — ``PairScorer``
+    now enforces exactly 2 conditions.
+  - ``test_single_condition_raises`` regex updated to
+    ``"exactly 2"``.
+  - ``test_validation_rejects_2_conditions`` regex updated to
+    ``"at least 3"``.
+  - ``test_omnibus_anova`` uses
+    ``df["test"].str.contains("anova")`` instead of equality on
+    ``df["test"].values``.
+  - Three plot tests now import ``matplotlib.pyplot as plt`` locally.
+
+- Suite size: 168 passed, 1 skipped.
+
+v0.7.1 (2026-06-07)
+-------------------
+
+**Bug fixes**
+
+- ``plot_star(color_by="entropy"|"cs_entropy")`` — colorbar limits now
+  auto-scale to the data range instead of being hardcoded to ``[0, 1]``,
+  so plots dominated by high entropy no longer appear uniformly red.
+  Added new ``vmin``, ``vmax``, and ``cmap`` keyword arguments to
+  ``plot_star_embedding()`` (and forwarded through
+  ``SingleScorer.plot_star`` / ``PairScorer.plot_star`` /
+  ``MultiScorer.plot_star``) for users who want to pin limits across
+  figures or change the colormap.
+
+- ``plot_star(color_by="nn_entropy"|"cs_nn_entropy")`` — previously fell
+  through to the generic numeric branch and looked up the missing column
+  ``nn_entropy`` (actual column is ``cs_nn_entropy``), producing a
+  fully gray scatter. Now uses a dedicated branch that reads the correct
+  column and emits a clear warning when ``score(k_nn=...)`` was not run.
+
+- ``plot_star(color_by="pseudotime")`` — added explicit support
+  (reads ``sccs_pseudotime`` with fallback to ``velocity_pseudotime``).
+  Removed unsupported ``"cytotrace"`` claim from the docstring.
+
+- ``plot_subset_comparison()`` — subsets containing only progenitor cells
+  produce ``pairwise_nCS = inf`` for cross-fate pairs; matplotlib was
+  silently dropping these bars, leaving an empty plot. The bars are now
+  rendered as gray-hatched placeholders at a small fraction of the finite
+  maximum with an "inf" annotation, and a ``UserWarning`` listing the
+  affected subsets is emitted.
+
+**Tutorial improvements**
+
+- Tutorial notebooks (single, pairwise, multi) now use long-form tidy
+  DataFrames for driver and enrichment displays. New helpers
+  ``_stack_drivers``, ``_stack_enrichment``, ``_stack_drivers_by_condition``,
+  ``_stack_enrichment_by_condition``, and ``_driver_overlap`` are defined
+  inline in each tutorial's setup cell. One ~20-row table replaces the
+  previous per-fate / per-condition print loops.
+
+- ``scCS_tutorial_pairwise.ipynb`` extended with full downstream sections
+  matching the single-condition tutorial:
+
+  - §6 Driver genes per condition (velocity + DEG drivers; per-condition
+    masking of ``adata_sub``; driver overlap table across conditions)
+  - §7 Pathway enrichment per condition (offline-safe via try/except)
+  - §8 Expression trends along fate arms — per condition
+    (``plot_expression_trends`` side by side)
+
+- ``scCS_tutorial_multi.ipynb`` rebuilt on the scVelo pancreas dataset
+  split into three RNA-velocity-magnitude tertiles
+  (``low_velocity`` / ``med_velocity`` / ``high_velocity``) instead of
+  synthetic random data. Includes all three tiers of statistical
+  comparison plus per-condition drivers (§10), enrichment (§11),
+  expression trends (§12), and ``transfer_labels`` + UMAP (§13).
+
+**Tests**
+
+- Added ``TestPlotStarAutoScale`` to ``tests/test_scores.py`` covering:
+
+  - ``test_plot_star_entropy_autoscale`` — asserts that the colorbar
+    ``norm.vmin``/``vmax`` track the per-cell entropy data range.
+  - ``test_plot_star_entropy_explicit_range`` — asserts that explicit
+    ``vmin``/``vmax`` kwargs are honored verbatim.
+  - ``test_plot_star_nn_entropy_renders`` — asserts a real norm (not the
+    gray-fallback) is built for ``color_by="nn_entropy"``.
+  - ``test_plot_subset_comparison_inf_handling`` — asserts the
+    ``UserWarning`` is emitted, at least one bar is hatched, and the
+    "inf" annotation is added.
+
+v0.7.0 (2026-06-06)
+--------------------
+
+**Breaking changes — class rename**
+
+- ``CommitmentScorer`` → ``SingleScorer`` (hard rename, no alias)
+- ``MultiConditionScorer`` → ``PairScorer`` (hard rename, no alias)
+- All references to old names removed from code, docs, and notebooks
+
+**New module: multicomparison.py**
+
+- ``MultiScorer`` — new top-level class for experiments with 3+ conditions.
+  Validates >= 3 conditions at init; suggests PairScorer for 2 conditions.
+
+  *Tier 2 — Omnibus + post-hoc statistical comparison*
+
+  - ``compare_omnibus(results, test='kruskal')`` — omnibus test across all
+    conditions per fate arm. Supports Kruskal-Wallis (non-parametric) and
+    one-way ANOVA (parametric). Returns tidy DataFrame with per-fate
+    statistics and adjusted p-values.
+  - ``compare_posthoc(results, method='dunn', pval_correction='fdr')`` —
+    post-hoc pairwise comparisons per fate arm. Supports Dunn's test,
+    Tukey HSD, and Conover-Iman test. Multiple testing correction via
+    FDR (Benjamini-Hochberg), Bonferroni, or Holm. Optionally filters
+    to fates where omnibus test was significant.
+  - ``compute_pairwise_deltas(n_bootstrap=500)`` — ΔCS with bootstrap CI
+    for ALL condition pairs (not just one pair like PairScorer).
+  - ``fit_mixed_model_contrasts(results, contrasts=None)`` — LMM with
+    custom condition contrasts via Wald tests.
+
+  *New visualizations*
+
+  - ``plot_omnibus_summary()`` — fates × conditions heatmap with omnibus
+    p-value annotation.
+  - ``plot_posthoc_heatmap()`` — condition × condition post-hoc p-value
+    heatmap per fate arm.
+  - ``plot_pairwise_delta_grid()`` — grid of ΔCS heatmaps for all pairs.
+
+**New documentation**
+
+- ``mathematical_framework.rst`` — dedicated page with full LaTeX derivations
+  of the scCS scoring framework, entropy metrics, and statistical tests.
+- ``scCS_tutorial_multi.ipynb`` — new tutorial notebook for MultiScorer
+  with 3+ conditions.
+- Expanded ``introduction.rst`` with three-scorer decision flowchart.
+- Restructured ``api.rst`` organized by scorer class.
+
+**New dependency**
+
+- ``scikit-posthocs>=0.8`` — required for Dunn's test and Conover-Iman
+  post-hoc comparisons in MultiScorer.
+
+**Internal**
+
+- ``_base.py`` — new module with ``_BaseScorer`` abstract class extracting
+  shared initialization and embedding logic from SingleScorer.
+- ``single.py`` — renamed from ``trajectory.py``.
+- ``pairwise.py`` — renamed from ``multiconditional.py``.
+- ``CONDITION_PALETTE`` extended to 12 colors for 3+ condition support.
+- ``conf.py`` — added ``sphinx.ext.mathjax`` for LaTeX rendering.
+
 v0.6.2 (2026-05-25)
 -------------------
 

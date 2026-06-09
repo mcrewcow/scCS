@@ -15,12 +15,19 @@ to any number of cell fates (k-furcations), with:
 - Population-level scores: unCS, nCS, commitment vector, entropy
 - Per-cell fate affinity scores with magnitude weighting
 - Bootstrap confidence intervals on CS values
-- Multi-condition analysis (MultiConditionScorer)
+- Multi-condition analysis (PairScorer for 2, MultiScorer for 3+)
+
+Three-scorer architecture
+-------------------------
+- **SingleScorer**: single-condition analysis (1 experimental group)
+- **PairScorer**: pairwise comparison (exactly 2 conditions)
+- **MultiScorer**: multi-condition comparison (3+ conditions) with
+  tiered statistical testing (omnibus + post-hoc)
 
 Quick start — single condition
 -------------------------------
 >>> import scCS
->>> scorer = scCS.CommitmentScorer(
+>>> scorer = scCS.SingleScorer(
 ...     adata,
 ...     root='17',
 ...     branches=['FateA', 'FateB', 'FateC'],
@@ -32,11 +39,28 @@ Quick start — single condition
 >>> result = scorer.score(n_bootstrap=500)
 >>> print(result.summary())
 >>> scorer.plot_star(result)
->>> scorer.transfer_labels(adata, result)               # write back to full adata
+>>> scorer.transfer_labels(adata, result)
 
-Quick start — multi-condition
-------------------------------
->>> mscorer = scCS.MultiConditionScorer(
+Quick start — pairwise comparison (2 conditions)
+--------------------------------------------------
+>>> pscorer = scCS.PairScorer(
+...     adata,
+...     root='17',
+...     branches=['homeostatic', 'activated'],
+...     condition_obs_key='treatment',
+...     obs_key='leiden',
+... )
+>>> pscorer.build_embedding(ordering_metric='pseudotime')
+>>> pscorer.refit_pseudotime(scale_01=False)
+>>> pscorer.fit()
+>>> results = pscorer.score_all_conditions()
+>>> delta = pscorer.compute_delta_CS('control', 'treated')
+>>> stats = pscorer.compare_conditions(results)
+>>> shift = pscorer.trajectory_shift(results)
+
+Quick start — multi-condition (3+ conditions)
+-----------------------------------------------
+>>> mscorer = scCS.MultiScorer(
 ...     adata,
 ...     root='17',
 ...     branches=['homeostatic', 'activated'],
@@ -44,36 +68,24 @@ Quick start — multi-condition
 ...     obs_key='leiden',
 ... )
 >>> mscorer.build_embedding(ordering_metric='pseudotime')
->>> mscorer.refit_pseudotime(scale_01=False)
 >>> mscorer.fit()
 >>> results = mscorer.score_all_conditions()
->>> delta = mscorer.compute_delta_CS('control', 'treated')
->>> stats = mscorer.compare_conditions(results)
->>> shift = mscorer.trajectory_shift(results)
->>> mscorer.plot_affinity_distributions(results)
->>> mscorer.plot_trajectory_shift(shift)
-
-For k=2 (reproducing manuscript):
->>> scorer = scCS.CommitmentScorer(
-...     adata,
-...     root='17',
-...     branches=['homeostatic', 'activated'],
-...     obs_key='leiden',
-... )
->>> scorer.build_embedding(ordering_metric='pseudotime')
->>> scorer.fit()
->>> result = scorer.score()
->>> # result.pairwise_nCS[0, 1] should be ~8.066 (manuscript value)
+>>> omnibus = mscorer.compare_omnibus(results)
+>>> posthoc = mscorer.compare_posthoc(results, omnibus_results=omnibus)
+>>> deltas = mscorer.compute_pairwise_deltas()
 """
 
-__version__ = "0.6.2"
+__version__ = "0.7.4"
 __author__ = "Emil Kriukov"
 
 # Main API — single condition
-from .trajectory import CommitmentScorer
+from .single import SingleScorer
 
-# Main API — multi-condition
-from .multiconditional import MultiConditionScorer
+# Main API — pairwise comparison (2 conditions)
+from .pairwise import PairScorer
+
+# Main API — multi-condition comparison (3+ conditions)
+from .multicomparison import MultiScorer
 
 # Fate map
 from .bifurcation import FateMap, build_fate_map
@@ -83,7 +95,7 @@ from .embedding import (
     build_star_embedding,
     project_velocity_star,
     run_velocity_pipeline,
-    recompute_subset_pseudotime,
+    compute_local_pseudotime,
     scale_metric_01,
 )
 
@@ -139,12 +151,16 @@ from .plot import (
     plot_delta_cs_heatmap,
     plot_compare_conditions_bar,
     plot_commitment_vector_radar,
+    plot_omnibus_summary,
+    plot_posthoc_heatmap,
+    plot_pairwise_delta_grid,
 )
 
 __all__ = [
     # Main classes
-    "CommitmentScorer",
-    "MultiConditionScorer",
+    "SingleScorer",
+    "PairScorer",
+    "MultiScorer",
     # Fate map
     "FateMap",
     "build_fate_map",
@@ -152,7 +168,7 @@ __all__ = [
     "build_star_embedding",
     "project_velocity_star",
     "run_velocity_pipeline",
-    "recompute_subset_pseudotime",
+    "compute_local_pseudotime",
     "scale_metric_01",
     # Results
     "CommitmentScoreResult",
@@ -195,4 +211,7 @@ __all__ = [
     "plot_delta_cs_heatmap",
     "plot_compare_conditions_bar",
     "plot_commitment_vector_radar",
+    "plot_omnibus_summary",
+    "plot_posthoc_heatmap",
+    "plot_pairwise_delta_grid",
 ]

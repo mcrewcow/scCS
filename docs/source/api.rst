@@ -5,25 +5,37 @@ This page documents all public classes and functions in scCS.
 Full source-linked documentation is also available in the **autoapi** section
 in the sidebar.
 
-CommitmentScorer
-----------------
+SingleScorer
+------------
 
-The main entry point for single-condition analysis. Wraps an AnnData object
-and exposes all scoring and plotting methods.
+Single-condition analysis. Wraps an AnnData object and exposes all scoring
+and plotting methods.
 
-.. autoclass:: scCS.CommitmentScorer
+.. autoclass:: scCS.SingleScorer
    :members:
    :undoc-members:
    :show-inheritance:
 
-MultiConditionScorer
---------------------
+PairScorer
+----------
 
-Multi-condition extension. Builds a shared star embedding on pooled data,
-then scores each condition separately. Provides statistical comparison,
-mixed-effects modeling, and trajectory shift analysis.
+Pairwise comparison (exactly 2 conditions). Builds a shared star embedding
+on pooled data, then scores each condition separately. Provides statistical
+comparison, mixed-effects modeling, and trajectory shift analysis.
 
-.. autoclass:: scCS.MultiConditionScorer
+.. autoclass:: scCS.PairScorer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+MultiScorer
+-----------
+
+Multi-condition comparison (3+ conditions). Same shared-embedding approach
+as PairScorer, plus tiered statistical testing: omnibus tests followed by
+post-hoc pairwise comparisons, all-pairs delta-CS, and mixed-model contrasts.
+
+.. autoclass:: scCS.MultiScorer
    :members:
    :undoc-members:
    :show-inheritance:
@@ -68,12 +80,18 @@ Single-condition plots:
 .. autofunction:: scCS.plot_subset_comparison
 .. autofunction:: scCS.plot_nn_entropy_elbow
 
-Multi-condition plots:
+Multi-condition plots (PairScorer + MultiScorer):
 
 .. autofunction:: scCS.plot_rose_grid
 .. autofunction:: scCS.plot_delta_cs_heatmap
 .. autofunction:: scCS.plot_compare_conditions_bar
 .. autofunction:: scCS.plot_commitment_vector_radar
+
+MultiScorer-specific plots:
+
+.. autofunction:: scCS.plot_omnibus_summary
+.. autofunction:: scCS.plot_posthoc_heatmap
+.. autofunction:: scCS.plot_pairwise_delta_grid
 
 Embedding
 ---------

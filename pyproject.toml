@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scCS-py"
-version = "0.6.2"
+version = "0.7.4"
 description = "Single-cell Commitment Scores with radial star embedding for k-furcation fate decisions, multi-condition analysis, and velocity-fate correlation drivers"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -29,6 +29,7 @@ dependencies = [
     "scanpy>=1.9",
     "scikit-learn>=1.2",
     "statsmodels>=0.14",
+    "scikit-posthocs>=0.8",
 ]
 
 [project.optional-dependencies]

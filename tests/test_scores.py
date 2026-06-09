@@ -20,7 +20,7 @@ Tests cover:
 16. FateMap construction (build_fate_map)
 17. End-to-end: synthetic bifurcation (k=2)
 18. End-to-end: synthetic trifurcation (k=3)
-19. End-to-end: full CommitmentScorer pipeline (synthetic AnnData)
+19. End-to-end: full SingleScorer pipeline (synthetic AnnData)
 """
 
 import warnings
@@ -1047,18 +1047,18 @@ class TestEndToEndTrifurcation:
 
 
 # ---------------------------------------------------------------------------
-# 19. End-to-end: full CommitmentScorer pipeline
+# 19. End-to-end: full SingleScorer pipeline
 # ---------------------------------------------------------------------------
 
-class TestCommitmentScorerPipeline:
+class TestSingleScorerPipeline:
     """Full pipeline test using synthetic AnnData (no scVelo required)."""
 
     def setup_method(self):
         self.adata = _make_adata(n_cells=300)
 
     def _make_scorer(self):
-        from scCS import CommitmentScorer
-        scorer = CommitmentScorer(
+        from scCS import SingleScorer
+        scorer = SingleScorer(
             self.adata,
             root="0",
             branches=["1", "2"],
@@ -1194,8 +1194,8 @@ class TestCommitmentScorerPipeline:
         assert isinstance(subset_results["ctrl"], CommitmentScoreResult)
 
     def test_not_fitted_raises(self):
-        from scCS import CommitmentScorer
-        scorer = CommitmentScorer(
+        from scCS import SingleScorer
+        scorer = SingleScorer(
             self.adata,
             root="0",
             branches=["1", "2"],
@@ -1204,8 +1204,8 @@ class TestCommitmentScorerPipeline:
             scorer.score()
 
     def test_no_embedding_raises(self):
-        from scCS import CommitmentScorer
-        scorer = CommitmentScorer(
+        from scCS import SingleScorer
+        scorer = SingleScorer(
             self.adata,
             root="0",
             branches=["1", "2"],
@@ -1235,7 +1235,7 @@ def _make_adata_k3(n_cells: int = 400, seed: int = 0) -> ad.AnnData:
     return adata
 
 # ---------------------------------------------------------------------------
-# 20. MultiConditionScorer tests
+# 20. PairScorer tests
 # ---------------------------------------------------------------------------
 
 def _make_adata_multicond(n_per_cond: int = 150, seed: int = 0) -> "ad.AnnData":
@@ -1264,13 +1264,13 @@ def _make_adata_multicond(n_per_cond: int = 150, seed: int = 0) -> "ad.AnnData":
 
 
 def _make_multicond_scorer(adata=None):
-    """Build and fit a MultiConditionScorer on synthetic data."""
-    from scCS.multiconditional import MultiConditionScorer
+    """Build and fit a PairScorer on synthetic data."""
+    from scCS.pairwise import PairScorer
 
     if adata is None:
         adata = _make_adata_multicond()
 
-    mscorer = MultiConditionScorer(
+    mscorer = PairScorer(
         adata,
         root="0",
         branches=["1", "2"],
@@ -1289,8 +1289,8 @@ def _make_multicond_scorer(adata=None):
     return mscorer
 
 
-class TestMultiConditionScorer:
-    """Tests for MultiConditionScorer and all Tier 2/3 methods."""
+class TestPairScorerPipeline:
+    """Tests for PairScorer and all Tier 2/3 methods."""
 
     def setup_method(self):
         self.adata = _make_adata_multicond()
@@ -1305,14 +1305,14 @@ class TestMultiConditionScorer:
 
     def test_repr_contains_key_info(self):
         r = repr(self.mscorer)
-        assert "MultiConditionScorer" in r
+        assert "PairScorer" in r
         assert "fitted" in r
         assert "ctrl" in r or "treat" in r
 
     def test_invalid_condition_key_raises(self):
-        from scCS.multiconditional import MultiConditionScorer
+        from scCS.pairwise import PairScorer
         with pytest.raises(ValueError, match="not found in adata.obs"):
-            MultiConditionScorer(
+            PairScorer(
                 self.adata,
                 root="0",
                 branches=["1", "2"],
@@ -1320,11 +1320,11 @@ class TestMultiConditionScorer:
             )
 
     def test_single_condition_raises(self):
-        from scCS.multiconditional import MultiConditionScorer
+        from scCS.pairwise import PairScorer
         adata_single = self.adata.copy()
         adata_single.obs["condition"] = "ctrl"
-        with pytest.raises(ValueError, match="at least 2 conditions"):
-            MultiConditionScorer(
+        with pytest.raises(ValueError, match="exactly 2 conditions"):
+            PairScorer(
                 adata_single,
                 root="0",
                 branches=["1", "2"],
@@ -1483,6 +1483,8 @@ class TestMultiConditionScorer:
         # Should contain the actual value
         assert "0.05" in output, "Expected pval_cutoff value '0.05' in output"
 
+    @pytest.mark.skip(reason="PairScorer enforces exactly 2 conditions; "
+                            "kruskal path moved to MultiScorer.compare_omnibus.")
     def test_compare_conditions_kruskal_path(self):
         """k>2 conditions should use kruskal-wallis test."""
         # Build a 3-condition dataset by relabeling the last 50 cells as "extra"
@@ -1491,8 +1493,8 @@ class TestMultiConditionScorer:
         cond_vals[-50:] = "extra"
         adata3cond.obs["condition"] = pd.Categorical(cond_vals)
 
-        from scCS.multiconditional import MultiConditionScorer
-        ms3 = MultiConditionScorer(
+        from scCS.pairwise import PairScorer
+        ms3 = PairScorer(
             adata3cond,
             root="0",
             branches=["1", "2"],
@@ -1596,8 +1598,8 @@ class TestVelocityFateDrivers:
         import scipy.sparse as sp
         adata.obsp["velocity_graph"] = sp.eye(n_cells, format="csr") * 0.1
 
-        from scCS.trajectory import CommitmentScorer
-        scorer = CommitmentScorer(
+        from scCS.single import SingleScorer
+        scorer = SingleScorer(
             adata, root="0", branches=["1", "2"], obs_key="leiden"
         )
         scorer.build_embedding(ordering_metric="pseudotime", verbose=False)
@@ -1683,7 +1685,7 @@ class TestNewPlots:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        """Build a minimal MultiConditionScorer with two conditions."""
+        """Build a minimal PairScorer with two conditions."""
         import anndata as ad
         import matplotlib
         matplotlib.use("Agg")  # non-interactive backend for tests
@@ -1710,8 +1712,8 @@ class TestNewPlots:
         import scipy.sparse as sp
         adata.obsp["velocity_graph"] = sp.eye(n_cells, format="csr") * 0.1
 
-        from scCS.multiconditional import MultiConditionScorer
-        mscorer = MultiConditionScorer(
+        from scCS.pairwise import PairScorer
+        mscorer = PairScorer(
             adata, root="0", branches=["1", "2"],
             condition_obs_key="condition", obs_key="leiden",
         )
@@ -1774,3 +1776,495 @@ class TestNewPlots:
         import scCS
         fig = scCS.plot_commitment_vector_radar(self.results)
         assert isinstance(fig, matplotlib.figure.Figure)
+
+
+
+
+# ---------------------------------------------------------------------------
+# 20b. Plot bug-fix tests (v0.7.1)
+# ---------------------------------------------------------------------------
+
+class TestPlotStarAutoScale:
+    """Smoke tests for the v0.7.1 plot.py fixes."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        import matplotlib
+        matplotlib.use("Agg")
+
+        # Build a tiny SingleScorer scored with k_nn so cs_nn_entropy exists
+        from scCS.single import SingleScorer
+
+        rng = np.random.default_rng(123)
+        n_cells = 200
+        n_genes = 20
+        X = rng.poisson(2.0, (n_cells, n_genes)).astype(float)
+        leiden = np.array(["0"] * 60 + ["1"] * 70 + ["2"] * 70)
+        pseudotime = np.concatenate([
+            rng.uniform(0.0, 0.2, 60),
+            rng.uniform(0.3, 1.0, 70),
+            rng.uniform(0.3, 1.0, 70),
+        ])
+
+        adata = ad.AnnData(X=X)
+        adata.obs["leiden"] = pd.Categorical(leiden)
+        adata.obs["velocity_pseudotime"] = pseudotime
+        adata.var_names = [f"gene_{i}" for i in range(n_genes)]
+
+        import scipy.sparse as sp
+        adata.obsp["velocity_graph"] = sp.eye(n_cells, format="csr") * 0.1
+
+        scorer = SingleScorer(
+            adata, root="0", branches=["1", "2"], obs_key="leiden",
+        )
+        scorer.build_embedding(ordering_metric="pseudotime", verbose=False)
+        n_sub = scorer.adata_sub.n_obs
+        scorer.load_velocity_vectors(
+            rng.normal(0.5, 0.3, n_sub), rng.normal(0.0, 0.2, n_sub)
+        )
+        scorer.fit(verbose=False)
+        # Score with k_nn so cs_nn_entropy is populated
+        self.result = scorer.score(cell_level=True, k_nn=10, verbose=False)
+        self.scorer = scorer
+        yield
+        import matplotlib.pyplot as plt
+        plt.close("all")
+
+    def test_plot_star_entropy_autoscale(self):
+        """vmin/vmax default to data range (not [0, 1])."""
+        import matplotlib.figure
+        fig = self.scorer.plot_star(self.result, color_by="entropy")
+        assert isinstance(fig, matplotlib.figure.Figure)
+        # Find the QuadMesh/PathCollection with a colorbar mappable
+        norm = None
+        for ax in fig.axes:
+            for coll in ax.collections:
+                if (hasattr(coll, "norm") and coll.norm is not None
+                        and coll.get_array() is not None
+                        and coll.get_array().size > 0):
+                    norm = coll.norm
+                    break
+            if norm is not None:
+                break
+        assert norm is not None, "No mappable found for colorbar"
+
+        # Data range of cs_entropy on the embedded subset
+        ent_vals = np.asarray(self.scorer.adata_sub.obs["cs_entropy"]).astype(float)
+        ent_vals = ent_vals[np.isfinite(ent_vals)]
+        # The colorbar limits should match the finite data range (not [0, 1])
+        assert np.isclose(norm.vmin, float(np.min(ent_vals)), atol=1e-6)
+        assert np.isclose(norm.vmax, float(np.max(ent_vals)), atol=1e-6)
+
+    def test_plot_star_entropy_explicit_range(self):
+        """Explicit vmin/vmax override autoscaling."""
+        fig = self.scorer.plot_star(
+            self.result, color_by="entropy", vmin=0.0, vmax=1.0
+        )
+        norm = None
+        for ax in fig.axes:
+            for coll in ax.collections:
+                if (hasattr(coll, "norm") and coll.norm is not None
+                        and coll.get_array() is not None
+                        and coll.get_array().size > 0):
+                    norm = coll.norm
+                    break
+            if norm is not None:
+                break
+        assert norm is not None
+        assert norm.vmin == 0.0
+        assert norm.vmax == 1.0
+
+    def test_plot_star_nn_entropy_renders(self):
+        """color_by='nn_entropy' now produces a real colored scatter (was gray)."""
+        import matplotlib.figure
+        # cs_nn_entropy was populated by score(k_nn=10) in setup
+        assert "cs_nn_entropy" in self.scorer.adata_sub.obs.columns
+        fig = self.scorer.plot_star(self.result, color_by="nn_entropy")
+        assert isinstance(fig, matplotlib.figure.Figure)
+        # Colorbar should reflect actual nn_entropy range, not be missing
+        nn_vals = np.asarray(
+            self.scorer.adata_sub.obs["cs_nn_entropy"]
+        ).astype(float)
+        nn_vals = nn_vals[np.isfinite(nn_vals)]
+        # Find the QuadMesh/PathCollection with a colorbar mappable
+        norm = None
+        for ax in fig.axes:
+            for coll in ax.collections:
+                if (hasattr(coll, "norm") and coll.norm is not None
+                        and coll.get_array() is not None
+                        and coll.get_array().size > 0):
+                    norm = coll.norm
+                    break
+            if norm is not None:
+                break
+        assert norm is not None, (
+            "nn_entropy branch fell through to gray fallback (no colormap)"
+        )
+        assert np.isclose(norm.vmin, float(np.min(nn_vals)), atol=1e-6)
+        assert np.isclose(norm.vmax, float(np.max(nn_vals)), atol=1e-6)
+
+    def test_plot_subset_comparison_inf_handling(self):
+        """Progenitor-only subsets render as hatched 'inf' placeholders, not empty."""
+        import warnings
+        import matplotlib.figure
+        from scCS.scores import CommitmentScoreResult
+        from scCS.plot import plot_subset_comparison
+
+        def _result(ncs):
+            return CommitmentScoreResult(
+                fate_names=["A", "B"],
+                M_bin=np.zeros(36),
+                bin_edges=np.linspace(-np.pi, np.pi, 37),
+                sectors=[(np.array([0.0]), np.array([1.0]))] * 2,
+                M_sector=np.array([1.0, 1.0]),
+                n_cells_per_fate=np.array([50, 50]),
+                commitment_vector=np.array([0.5, 0.5]),
+                population_entropy=1.0,
+                mean_cell_entropy=0.85,
+                per_fate_entropy=np.array([0.8, 0.9]),
+                pairwise_unCS=np.abs(ncs),
+                pairwise_nCS=ncs,
+                cell_scores=None,
+                fate_angles=np.array([0.0, np.pi]),
+                cell_obs_names=[f"c{i}" for i in range(50)],
+            )
+
+        subset_results = {
+            "good": _result(np.array([[0.0, 0.7], [0.7, 0.0]])),
+            "prog_only": _result(np.array([[0.0, np.inf], [np.inf, 0.0]])),
+        }
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            fig = plot_subset_comparison(subset_results, figsize=(6, 3))
+
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+        # UserWarning must be emitted listing the bad subset
+        bad_warns = [
+            x for x in w
+            if issubclass(x.category, UserWarning)
+            and "prog_only" in str(x.message)
+        ]
+        assert len(bad_warns) >= 1, "Expected UserWarning naming the inf subset"
+
+        # Inspect bars: good=finite, prog_only=hatched
+        ax = fig.axes[0]
+        rects = [p for c in ax.containers for p in c.patches]
+        hatched = [p for p in rects if p.get_hatch()]
+        assert len(hatched) >= 1, "Expected at least one hatched 'inf' bar"
+        # And an "inf" text annotation
+        labels = [t.get_text() for t in ax.texts]
+        assert "inf" in labels, "Expected 'inf' annotation on hatched bar"
+
+
+# ---------------------------------------------------------------------------
+# Helper for 3+ condition tests
+# ---------------------------------------------------------------------------
+
+def _make_adata_multicond3(n_per_cond: int = 100, seed: int = 0) -> "ad.AnnData":
+    """Synthetic AnnData with 3 conditions, 3 clusters (0=progenitor, 1/2=fates)."""
+    rng = np.random.default_rng(seed)
+    n_total = n_per_cond * 3
+    X = rng.normal(size=(n_total, 20))
+
+    # 3 clusters: 0=progenitor (33/cond), 1=fateA (33/cond), 2=fateB (34/cond)
+    n_per_cluster = n_per_cond // 3
+    labels = np.array(
+        ["0"] * n_per_cluster + ["1"] * n_per_cluster + ["2"] * (n_per_cond - 2 * n_per_cluster) +
+        ["0"] * n_per_cluster + ["1"] * n_per_cluster + ["2"] * (n_per_cond - 2 * n_per_cluster) +
+        ["0"] * n_per_cluster + ["1"] * n_per_cluster + ["2"] * (n_per_cond - 2 * n_per_cluster)
+    )
+    conditions = np.array(
+        ["ctrl"] * n_per_cond + ["drug_A"] * n_per_cond + ["drug_B"] * n_per_cond
+    )
+    pseudotime = np.concatenate([
+        rng.uniform(0.0, 0.3, n_per_cluster),
+        rng.uniform(0.5, 1.0, n_per_cluster),
+        rng.uniform(0.5, 1.0, n_per_cond - 2 * n_per_cluster),
+        rng.uniform(0.0, 0.3, n_per_cluster),
+        rng.uniform(0.5, 1.0, n_per_cluster),
+        rng.uniform(0.5, 1.0, n_per_cond - 2 * n_per_cluster),
+        rng.uniform(0.0, 0.3, n_per_cluster),
+        rng.uniform(0.5, 1.0, n_per_cluster),
+        rng.uniform(0.5, 1.0, n_per_cond - 2 * n_per_cluster),
+    ])
+    adata = ad.AnnData(X=X)
+    adata.obs["leiden"] = pd.Categorical(labels)
+    adata.obs["condition"] = pd.Categorical(conditions)
+    adata.obs["velocity_pseudotime"] = pseudotime
+    return adata
+
+
+def _make_multiscorer(adata=None):
+    """Build and fit a MultiScorer on synthetic 3-condition data."""
+    from scCS.multicomparison import MultiScorer
+
+    if adata is None:
+        adata = _make_adata_multicond3()
+
+    mscorer = MultiScorer(
+        adata,
+        root="0",
+        branches=["1", "2"],
+        condition_obs_key="condition",
+        obs_key="leiden",
+    )
+    mscorer.build_embedding(ordering_metric="pseudotime", verbose=False)
+
+    # Inject synthetic velocity vectors
+    rng = np.random.default_rng(42)
+    n_sub = mscorer._scorer.adata_sub.n_obs
+    vx = rng.normal(0.5, 0.3, n_sub)
+    vy = rng.normal(0.0, 0.2, n_sub)
+    mscorer._scorer.load_velocity_vectors(vx, vy)
+    mscorer.fit(verbose=False)
+    return mscorer
+
+
+# ---------------------------------------------------------------------------
+# 21. MultiScorer tests
+# ---------------------------------------------------------------------------
+
+class TestMultiScorerPipeline:
+    """Tests for MultiScorer — 3+ condition comparisons."""
+
+    def setup_method(self):
+        self.adata = _make_adata_multicond3()
+        self.mscorer = _make_multiscorer(self.adata)
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+
+    def test_conditions_detected(self):
+        assert set(self.mscorer.conditions) == {"ctrl", "drug_A", "drug_B"}
+
+    def test_repr_contains_key_info(self):
+        r = repr(self.mscorer)
+        assert "MultiScorer" in r
+        assert "fitted" in r
+
+    def test_validation_rejects_2_conditions(self):
+        """MultiScorer should reject exactly 2 conditions (suggest PairScorer)."""
+        from scCS.multicomparison import MultiScorer
+        adata2 = _make_adata_multicond()  # 2 conditions
+        with pytest.raises(ValueError, match="at least 3 conditions"):
+            MultiScorer(
+                adata2,
+                root="0",
+                branches=["1", "2"],
+                condition_obs_key="condition",
+                obs_key="leiden",
+            )
+
+    def test_validation_rejects_1_condition(self):
+        """MultiScorer should reject 1 condition."""
+        from scCS.multicomparison import MultiScorer
+        adata1 = self.adata.copy()
+        adata1.obs["condition"] = "ctrl"
+        with pytest.raises(ValueError, match="at least 3 conditions"):
+            MultiScorer(
+                adata1,
+                root="0",
+                branches=["1", "2"],
+                condition_obs_key="condition",
+                obs_key="leiden",
+            )
+
+    # ------------------------------------------------------------------
+    # score_all_conditions
+    # ------------------------------------------------------------------
+
+    def test_score_all_conditions_returns_three(self):
+        results = self.mscorer.score_all_conditions(verbose=False)
+        assert set(results.keys()) == {"ctrl", "drug_A", "drug_B"}
+
+    def test_score_all_conditions_result_type(self):
+        results = self.mscorer.score_all_conditions(verbose=False)
+        for cond, res in results.items():
+            assert isinstance(res, CommitmentScoreResult)
+
+    def test_score_all_conditions_cell_scores_available(self):
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        for cond, res in results.items():
+            assert res.cell_scores is not None
+            assert res.cell_scores.shape[1] == 2
+
+    # ------------------------------------------------------------------
+    # compare_omnibus
+    # ------------------------------------------------------------------
+
+    def test_omnibus_kruskal(self):
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_omnibus(results, test="kruskal", verbose=False)
+        assert isinstance(df, pd.DataFrame)
+        for col in ["fate", "test", "statistic", "pval", "pval_adj", "significant", "n_conditions"]:
+            assert col in df.columns, f"Missing column '{col}'"
+        assert len(df) == 2  # 2 fates
+        assert (df["n_conditions"] == 3).all()
+
+    def test_omnibus_anova(self):
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_omnibus(results, test="anova", verbose=False)
+        assert isinstance(df, pd.DataFrame)
+        assert df["test"].str.contains("anova").all()
+
+    def test_omnibus_pval_adj_in_range(self):
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_omnibus(results, verbose=False)
+        assert df["pval_adj"].between(0.0, 1.0).all()
+
+    # ------------------------------------------------------------------
+    # compare_posthoc
+    # ------------------------------------------------------------------
+
+    def test_posthoc_dunn(self):
+        pytest.importorskip("scikit_posthocs")
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_posthoc(results, method="dunn", verbose=False)
+        assert isinstance(df, pd.DataFrame)
+        for col in ["fate", "comparison", "method", "pval", "pval_adj", "significant"]:
+            assert col in df.columns, f"Missing column '{col}'"
+        # 3 conditions -> C(3,2) = 3 pairwise comparisons per fate
+        assert len(df) == 2 * 3  # 2 fates × 3 pairs
+
+    def test_posthoc_fdr_correction(self):
+        pytest.importorskip("scikit_posthocs")
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_posthoc(
+            results, method="dunn", pval_correction="fdr", verbose=False
+        )
+        # FDR correction: pval_adj should be >= pval (or equal)
+        assert (df["pval_adj"] >= df["pval"] - 1e-10).all()
+
+    def test_posthoc_bonferroni_correction(self):
+        pytest.importorskip("scikit_posthocs")
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.compare_posthoc(
+            results, method="dunn", pval_correction="bonferroni", verbose=False
+        )
+        # Bonferroni: pval_adj = min(pval * n_tests, 1.0)
+        assert df["pval_adj"].between(0.0, 1.0).all()
+
+    def test_posthoc_with_omnibus_filter(self):
+        pytest.importorskip("scikit_posthocs")
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        omnibus_df = self.mscorer.compare_omnibus(results, verbose=False)
+        posthoc_df = self.mscorer.compare_posthoc(
+            results, omnibus_results=omnibus_df, verbose=False
+        )
+        # Should only include fates where omnibus was significant
+        # (or all if none significant, depending on implementation)
+        assert isinstance(posthoc_df, pd.DataFrame)
+
+    # ------------------------------------------------------------------
+    # compute_pairwise_deltas
+    # ------------------------------------------------------------------
+
+    def test_pairwise_deltas(self):
+        deltas = self.mscorer.compute_pairwise_deltas(
+            n_bootstrap=20, verbose=False
+        )
+        # 3 conditions -> C(3,2) = 3 pairs
+        assert len(deltas) == 3
+        for key, delta in deltas.items():
+            assert "delta_nCS" in delta
+            assert "ci_low" in delta
+            assert "ci_high" in delta
+            assert delta["delta_nCS"].shape == (2, 2)
+
+    def test_pairwise_deltas_ci_ordering(self):
+        deltas = self.mscorer.compute_pairwise_deltas(
+            n_bootstrap=20, verbose=False
+        )
+        for key, delta in deltas.items():
+            d = delta["delta_nCS"]
+            lo = delta["ci_low"]
+            hi = delta["ci_high"]
+            finite = np.isfinite(d) & np.isfinite(lo) & np.isfinite(hi)
+            assert np.all(lo[finite] <= hi[finite])
+
+    # ------------------------------------------------------------------
+    # fit_mixed_model_contrasts
+    # ------------------------------------------------------------------
+
+    def test_mixed_model_contrasts(self):
+        pytest.importorskip("statsmodels")
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        df = self.mscorer.fit_mixed_model_contrasts(
+            results, ref_condition="ctrl", verbose=False
+        )
+        assert isinstance(df, pd.DataFrame)
+        if not df.empty:
+            for col in ["fate", "contrast", "coef", "std_err", "z_score", "pval", "pval_adj", "significant"]:
+                assert col in df.columns, f"Missing column '{col}'"
+
+    def test_mixed_model_contrasts_custom(self):
+        pytest.importorskip("statsmodels")
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        contrasts = [("drug_A", "ctrl"), ("drug_B", "ctrl")]
+        df = self.mscorer.fit_mixed_model_contrasts(
+            results, contrasts=contrasts, verbose=False
+        )
+        assert isinstance(df, pd.DataFrame)
+
+    # ------------------------------------------------------------------
+    # Plot smoke tests
+    # ------------------------------------------------------------------
+
+    def test_plot_omnibus_summary_returns_figure(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        omnibus_df = self.mscorer.compare_omnibus(results, verbose=False)
+        fig = self.mscorer.plot_omnibus_summary(omnibus_df, results)
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_plot_posthoc_heatmap_returns_figure(self):
+        pytest.importorskip("scikit_posthocs")
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        results = self.mscorer.score_all_conditions(
+            cell_level=True, verbose=False
+        )
+        posthoc_df = self.mscorer.compare_posthoc(results, verbose=False)
+        fig = self.mscorer.plot_posthoc_heatmap(posthoc_df)
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")
+
+    def test_plot_pairwise_delta_grid_returns_figure(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        deltas = self.mscorer.compute_pairwise_deltas(
+            n_bootstrap=20, verbose=False
+        )
+        fig = self.mscorer.plot_pairwise_delta_grid(deltas)
+        assert isinstance(fig, plt.Figure)
+        plt.close("all")

@@ -9,6 +9,44 @@ It generalizes the 2-state (homeostatic/activated) commitment score framework
 introduced in Kriukov et al. (2025) to arbitrary **k-furcations** — branching
 points where a progenitor population splits into k ≥ 2 terminal fates.
 
+Three-Scorer Architecture
+-------------------------
+
+v0.7 introduces a three-scorer architecture, each designed for a specific
+experimental design:
+
+.. code-block:: text
+
+    How many experimental conditions?
+           │
+           ├── 1 condition  →  SingleScorer
+           │                    Single-condition analysis: embedding,
+           │                    scoring, driver genes, enrichment
+           │
+           ├── 2 conditions →  PairScorer
+           │                    Pairwise comparison: permutation test,
+           │                    delta-CS with bootstrap CI, mixed model
+           │
+           └── 3+ conditions → MultiScorer
+                                Multi-comparison: omnibus tests (Kruskal-Wallis,
+                                ANOVA), post-hoc (Dunn, Tukey, Conover),
+                                pairwise deltas, mixed model contrasts
+
+**SingleScorer** — single-condition analysis
+    Build a radial star embedding, compute commitment scores, per-cell fate
+    affinities, entropy metrics, driver genes, and pathway enrichment.
+
+**PairScorer** — pairwise comparison (exactly 2 conditions)
+    Build a shared embedding on pooled data, score each condition separately,
+    then compare using permutation tests, delta-CS with bootstrap CI,
+    mixed-effects models, and trajectory shift analysis.
+
+**MultiScorer** — multi-condition comparison (3+ conditions)
+    Same shared-embedding approach as PairScorer, plus tiered statistical
+    testing: omnibus tests (Kruskal-Wallis, ANOVA) followed by post-hoc
+    pairwise comparisons (Dunn, Tukey HSD, Conover-Iman) with FDR/Bonferroni
+    correction, all-pairs delta-CS, and mixed-model contrasts.
+
 Motivation
 ----------
 
@@ -22,6 +60,64 @@ This is particularly useful when:
 - Identifying driver genes that correlate with commitment
 - Quantifying reversibility of cell state transitions
 - Studying multi-fate branching points (k ≥ 3)
+- Testing whether commitment shifts across 3+ treatment groups
+
+Quick Start — SingleScorer
+---------------------------
+
+.. code-block:: python
+
+    import scCS
+
+    scorer = scCS.SingleScorer(
+        adata,
+        root='17',
+        branches=['FateA', 'FateB', 'FateC'],
+        obs_key='leiden',
+    )
+    scorer.build_embedding(ordering_metric='pseudotime')
+    scorer.refit_pseudotime()
+    scorer.fit()
+    result = scorer.score(n_bootstrap=500)
+    print(result.summary())
+    scorer.plot_star(result)
+
+Quick Start — PairScorer
+-------------------------
+
+.. code-block:: python
+
+    pscorer = scCS.PairScorer(
+        adata,
+        root='17',
+        branches=['homeostatic', 'activated'],
+        condition_obs_key='treatment',
+        obs_key='leiden',
+    )
+    pscorer.build_embedding(ordering_metric='pseudotime')
+    pscorer.fit()
+    results = pscorer.score_all_conditions()
+    delta = pscorer.compute_delta_CS('control', 'treated')
+    stats = pscorer.compare_conditions(results)
+
+Quick Start — MultiScorer
+--------------------------
+
+.. code-block:: python
+
+    mscorer = scCS.MultiScorer(
+        adata,
+        root='17',
+        branches=['homeostatic', 'activated'],
+        condition_obs_key='treatment',
+        obs_key='leiden',
+    )
+    mscorer.build_embedding(ordering_metric='pseudotime')
+    mscorer.fit()
+    results = mscorer.score_all_conditions()
+    omnibus = mscorer.compare_omnibus(results)
+    posthoc = mscorer.compare_posthoc(results, omnibus_results=omnibus)
+    deltas = mscorer.compute_pairwise_deltas()
 
 Mathematical Framework
 ----------------------
@@ -38,6 +134,8 @@ Given per-cell RNA velocity vectors projected into a radial star embedding:
 For k fates, a full k×k pairwise matrix of unCS and nCS is computed.
 Per-cell scores are derived from the dot product of each cell's velocity
 vector with the unit direction toward each fate centroid.
+
+See :doc:`mathematical_framework` for full derivations with LaTeX.
 
 Entropy Metrics
 ---------------
@@ -73,7 +171,7 @@ Workflow
     AnnData (with scVelo velocity)
            │
            ▼
-    CommitmentScorer(adata, root=..., branches=[...], obs_key=...)
+    SingleScorer(adata, root=..., branches=[...], obs_key=...)
            │
            ├── build_embedding(ordering_metric='pseudotime')
            │                          → radial star layout in obsm['X_sccs']
@@ -96,19 +194,19 @@ Workflow
            ├── plot_pairwise_cs()         → k×k heatmap
            ├── plot_nn_entropy_elbow()    → choose optimal k_nn
            ├── plot_expression_trends()   → gene expression vs CS axis
-           ├── get_velocity_drivers()     → ranked driver genes per fate (mean velocity)
+           ├── get_velocity_drivers()     → ranked driver genes per fate
            ├── get_deg_drivers()          → DEG analysis per fate arm
-           ├── get_velocity_fate_drivers() → velocity-fate Spearman correlation drivers
+           ├── get_velocity_fate_drivers() → velocity-fate Spearman correlation
            └── get_enrichment()           → pathway enrichment per fate
 
-    MultiConditionScorer(adata, root=..., branches=[...],
-                         condition_obs_key=..., obs_key=...)
+    PairScorer(adata, root=..., branches=[...],
+               condition_obs_key=..., obs_key=...)
            │
            ├── build_embedding() / fit() / refit_pseudotime()
            │
            ├── score_all_conditions()     → dict[condition → CommitmentScoreResult]
            ├── compute_delta_CS()         → ΔnCS matrix with bootstrap CI
-           ├── compare_conditions()       → per-fate statistical tests
+           ├── compare_conditions()       → permutation test (k=2)
            ├── fit_mixed_model()          → LMM with replicate random effect
            ├── trajectory_shift()         → KS + Wasserstein pseudotime shift
            │
@@ -119,6 +217,28 @@ Workflow
            ├── plot_compare_conditions_bar() → grouped nCS bar chart
            ├── plot_commitment_vector_radar() → radar chart of commitment vectors
            └── plot_trajectory_shift()    → KDE pseudotime distributions
+
+    MultiScorer(adata, root=..., branches=[...],
+                condition_obs_key=..., obs_key=...)
+           │
+           ├── build_embedding() / fit()
+           │
+           ├── score_all_conditions()     → dict[condition → CommitmentScoreResult]
+           │
+           ├── Tier 2: Omnibus + post-hoc
+           │   ├── compare_omnibus()      → Kruskal-Wallis / ANOVA per fate
+           │   ├── compare_posthoc()      → Dunn / Tukey / Conover pairwise
+           │   └── compute_pairwise_deltas() → ΔCS for ALL condition pairs
+           │
+           ├── Tier 3: Mixed models + trajectory
+           │   ├── fit_mixed_model()      → LMM with replicate random effect
+           │   ├── fit_mixed_model_contrasts() → custom condition contrasts
+           │   └── trajectory_shift()     → KS + Wasserstein pseudotime shift
+           │
+           ├── plot_omnibus_summary()     → fates × conditions heatmap + significance
+           ├── plot_posthoc_heatmap()     → condition × condition p-value heatmap
+           ├── plot_pairwise_delta_grid() → grid of ΔCS heatmaps for all pairs
+           └── [all PairScorer plots also available]
 
 Citation
 --------

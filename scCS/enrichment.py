@@ -104,7 +104,7 @@ def _resolve_gene_sets(
 
 def run_enrichment_per_fate(
     deg_drivers: Dict[str, pd.DataFrame],
-    fate_names: List[str],
+    fate_names: Optional[List[str]] = None,
     gene_sets: Optional[List[str]] = None,
     organism: str = "mouse",
     pval_threshold: float = 0.05,
@@ -122,8 +122,12 @@ def run_enrichment_per_fate(
     deg_drivers : dict
         Output of get_deg_drivers().
         fate_name -> DataFrame[gene, logfoldchange, pval, pval_adj, significant]
-    fate_names : list of str
-        Terminal fate cluster labels (determines iteration order).
+    fate_names : list of str, optional
+        Terminal fate cluster labels (determines iteration order).  If
+        omitted (default ``None``), the fate names are inferred from
+        ``deg_drivers.keys()`` in their natural insertion order.  If
+        provided but missing entries that appear in ``deg_drivers``, a
+        warning is emitted and only the intersection is used.
     gene_sets : list of str, optional
         Enrichr gene set library names.  Defaults to KEGG + GO BP + Reactome
         for the specified organism.
@@ -165,6 +169,25 @@ def run_enrichment_per_fate(
 
     # Resolve gene set names — substitutes stale year-suffixed names if needed
     gene_sets = _resolve_gene_sets(gene_sets, organism)
+
+    # Default / validate fate_names against deg_drivers keys
+    deg_keys = list(deg_drivers.keys())
+    if fate_names is None:
+        fate_names = deg_keys
+    else:
+        provided = list(fate_names)
+        missing = [n for n in provided if n not in deg_drivers]
+        extra_in_dict = [n for n in deg_keys if n not in provided]
+        if missing or extra_in_dict:
+            warnings.warn(
+                "run_enrichment_per_fate: fate_names and deg_drivers.keys() "
+                f"do not match.  Missing from deg_drivers: {missing}.  "
+                f"In deg_drivers but not in fate_names: {extra_in_dict}.  "
+                "Using only fates present in both.",
+                UserWarning,
+                stacklevel=2,
+            )
+        fate_names = [n for n in provided if n in deg_drivers]
 
     enrichment_results: Dict[str, Dict[str, pd.DataFrame]] = {}
 

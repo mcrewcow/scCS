@@ -6,9 +6,11 @@ scCS — Single-Cell Commitment Scores
    :caption: Contents
 
    introduction
+   mathematical_framework
    requirements
-   scCS_tutorial_single_condition
-   scCS_tutorial_pairwise_comparison
+   scCS_tutorial_single
+   scCS_tutorial_pairwise
+   scCS_tutorial_multi
    scCS_tutorial_benchmark
    api
    changelog

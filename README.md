@@ -48,7 +48,7 @@ pip install git+https://github.com/mcrewcow/scCS.git
 ```python
 import scCS
 
-scorer = scCS.CommitmentScorer(
+scorer = scCS.SingleScorer(
     adata,
     root="17",                              # leiden cluster at the branching point
     branches=["homeostatic", "activated"],  # terminal fate clusters
@@ -76,7 +76,7 @@ scorer.plot_commitment_bar(result)
 | **NN-smoothed entropy** | Nearest-neighbor smoothed per-cell entropy in the scCS embedding; elbow plots to choose k |
 | **Driver genes** | Velocity-based, DEG-based, and velocity-fate correlation drivers per fate arm |
 | **Pathway enrichment** | Enrichr ORA (KEGG, GO BP, Reactome) per fate, up and down |
-| **Multi-condition analysis** | `MultiConditionScorer` for comparing commitment across conditions |
+| **Multi-condition analysis** | `PairScorer` for comparing commitment across conditions |
 | **Color map support** | Pass your original scanpy/Seurat cluster colors to all plots |
 
 ---
@@ -110,7 +110,7 @@ fig = scorer.plot_nn_entropy_elbow(k_nn_range=range(5, 51, 5))
 import scCS
 
 # 1. Initialize
-scorer = scCS.CommitmentScorer(
+scorer = scCS.SingleScorer(
     adata,
     root="17",
     branches=["homeostatic", "activated"],
@@ -162,7 +162,7 @@ scorer.transfer_labels(adata, result)
 import scCS
 
 # Initialize with condition key
-mscorer = scCS.MultiConditionScorer(
+mscorer = scCS.PairScorer(
     adata,
     root="17",
     branches=["homeostatic", "activated"],
@@ -244,6 +244,9 @@ vf_drivers = scorer.get_velocity_fate_drivers(
 | `plot_compare_conditions_bar()` | Grouped bar chart of nCS per condition |
 | `plot_commitment_vector_radar()` | Radar chart of commitment vectors per condition |
 | `plot_trajectory_shift()` | KDE plots of pseudotime distributions by condition |
+| `plot_omnibus_summary()` | Fates × conditions heatmap with omnibus significance |
+| `plot_posthoc_heatmap()` | Condition × condition post-hoc p-value heatmap per fate |
+| `plot_pairwise_delta_grid()` | Grid of ΔCS heatmaps for all condition pairs |
 
 ---
 
@@ -253,7 +256,7 @@ Reproducing the k=2 microglia bifurcation from Kriukov et al. (2025)
 (GEO: [GSE285564](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE285564)):
 
 ```python
-scorer = scCS.CommitmentScorer(
+scorer = scCS.SingleScorer(
     adata,
     root="17",
     branches=["homeostatic", "activated"],
