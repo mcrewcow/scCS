@@ -21,3 +21,11 @@ env/
 
 # OS
 .DS_Store
+
+# Generated documentation and package builds
+docs/_build/
+
+# Python caches
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
