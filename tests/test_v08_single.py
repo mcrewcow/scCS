@@ -9,7 +9,7 @@ from scipy import sparse
 
 anndata = pytest.importorskip("anndata")
 
-from scCS import Furcation, FurcationScoreResult, SingleScorer
+from scCS import Furcation, FurcationScoreResult, SingleScorer, __version__
 from scCS.population import PopulationCommitmentSummary
 
 
@@ -540,7 +540,7 @@ def test_result_metadata_contains_versioned_scientific_configuration():
     scorer.score(write_to_adata=True, verbose=False)
     metadata = scorer.adata.uns["sccs"]
     assert metadata["schema_version"] == "0.8"
-    assert metadata["package_version"].startswith("0.8.0.dev")
+    assert metadata["package_version"] == __version__
     assert metadata["affinity_model"] == "calibrated_cosine_softmax"
     assert metadata["geometry"]["type"].endswith("fixed_terminal_vertices")
     assert "projection" in metadata

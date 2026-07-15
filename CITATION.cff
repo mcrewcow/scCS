@@ -8,5 +8,5 @@ message: Please cite the software repository and the exact package version used.
 repository-code: https://github.com/mcrewcow/scCS
 url: https://sccs-py.readthedocs.io/
 license: MIT
-version: 0.8.0.dev34
+version: 0.8.0
 date-released: 2026-07-14
