@@ -1,33 +1,67 @@
-# scCS — Single-Cell Commitment Scores
+# scCS
 
-[![PyPI](https://img.shields.io/pypi/v/scCS-py)](https://pypi.org/project/scCS-py)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/scCS-py)](https://pypi.org/project/scCS-py)
-[![Documentation Status](https://readthedocs.org/projects/sccs-py/badge/?version=latest)](https://sccs-py.readthedocs.io/en/latest/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/mcrewcow/scCS/actions/workflows/python-package.yml/badge.svg)](https://github.com/mcrewcow/scCS/actions/workflows/python-package.yml)
+**scCS** is a supervised framework for quantifying cell-fate commitment at a
+manually annotated furcation. You provide one root population, two or more
+candidate fate populations, an ordering coordinate, and an RNA-velocity
+transition graph. scCS standardizes the trajectory as a root-plus-star display
+while keeping the scientific calculation tied to the original biological graph.
 
-**scCS** quantifies RNA velocity-based commitment scores for single-cell data,
-generalizing the 2-state framework from
-Kriukov et al. (2025) to arbitrary **k-furcations** — branching points where
-a progenitor population splits into k ≥ 2 terminal fates.
+scCS does **not** infer topology, discover terminal states, or replace RNA
+velocity. It answers a narrower question:
 
----
+> Given a biologically justified root and candidate fates, how strongly and how
+> specifically is each cell associated with those futures, and is it moving
+> forward, backward, or ambiguously along the supplied ordering?
 
-## What it does
 
-Classical RNA velocity tools (scVelo, CellRank) describe *where* cells are
-going. scCS answers a complementary question: **how strongly committed is each
-cell to a given fate, relative to the alternatives?**
+## Start here
 
-Given RNA velocity vectors projected into a radial star embedding, scCS computes:
+New to scCS? Read the **Introduction** in Read the Docs before the API pages. It explains what scCS assumes, how DFFP differs from a projected velocity vector, how to choose a scorer and ordering, and how to interpret CFA, DFR, FFS, RC, UFP, and SOF together. The **Mathematical framework** page derives the discounted hitting-probability equations and Signed Ordering Flux step by step.
 
-- **unCS / nCS** — unnormalized and cell-count-corrected pairwise commitment scores
-- **Per-cell fate affinities** — cosine similarity of each cell's velocity to each fate direction
-- **Population entropy** — how evenly velocity mass is distributed across fates
-- **Per-fate cell entropy** — how individually decisive cells are toward each fate specifically
-- **NN-smoothed entropy** — spatially local commitment uncertainty, noise-robust
+Recommended learning order:
 
----
+1. Introduction and mathematical framework;
+2. pancreas or Schwann SingleScorer tutorial;
+3. method-selection and complex-branch tutorials;
+4. PairScorer or MultiScorer for replicate-aware conditions;
+5. downstream analysis and scalability.
+
+## Two explicit scoring modes
+
+scCS keeps two scientifically different questions separate.
+
+### Discounted Future-Fate Propagation — recommended for fate identity
+
+**Discounted Future-Fate Propagation (DFFP)** is implemented by
+`scoring_mode="future_fate"`. It calculates geometrically discounted hitting
+probabilities on the original RNA-velocity transition graph. Paths may leave the
+selected cells and return. The star does not define the probabilities.
+
+The principal outputs and documentation terms are:
+
+- **Conditional Fate Affinity (CFA)** — `future_fate_affinity` — conditional probability across the supervised fates;
+- **Discounted Fate Reach (DFR)** — `future_fate_reach`, the discounted probability of reaching any supervised fate anchor;
+- **Future-Fate Specificity (FFS)** — `1 - normalized entropy(affinity)`;
+- **Resolved Commitment (RC)** — `reach_supported_specificity`, reach multiplied by specificity;
+- **Unresolved Future Probability (UFP)** — `unresolved_probability`, the probability that the discounted process stops first;
+- **Signed Ordering Flux (SOF)** — `signed_progression`, the expected change in the supplied ordering after
+  conditioning on transitions retained within the selected furcation.
+
+Fate identity and progression are independent. A cell can retain a strong future
+association with a fate while moving backward, turning, looping, or showing mixed
+motion. scCS therefore does not require every annotated branch to move monotonically
+outward.
+
+### Instantaneous transition pushforward — retained for local direction
+
+`scoring_mode="instantaneous"` projects the immediate transition-induced
+displacement into the supervised simplex geometry and calculates cosine-softmax
+directional affinity. This remains useful when the scientific question is local
+velocity direction rather than future reachability.
+
+The two modes are not interchangeable. The documentation and method-selection
+tutorial explain the distinction and the validation that led to the discounted
+future-fate mode.
 
 ## Installation
 
@@ -35,247 +69,254 @@ Given RNA velocity vectors projected into a radial star embedding, scCS computes
 pip install scCS-py
 ```
 
-Or from source:
+RNA-velocity utilities require the optional scVelo dependency:
 
 ```bash
-pip install git+https://github.com/mcrewcow/scCS.git
+pip install "scCS-py[velocity]"
 ```
 
----
+For all optional analysis features:
 
-## Quickstart
+```bash
+pip install "scCS-py[all]"
+```
+
+## Quick start: future-fate scoring
 
 ```python
 import scCS
 
 scorer = scCS.SingleScorer(
     adata,
-    root="17",                              # leiden cluster at the branching point
-    branches=["homeostatic", "activated"],  # terminal fate clusters
-    obs_key="leiden",
-)
-scorer.build_embedding(ordering_metric="pseudotime")
-scorer.fit()
-result = scorer.score(cell_level=True)
-
-print(result.summary())
-scorer.plot_star(result)
-scorer.plot_commitment_bar(result)
-```
-
----
-
-## Key features
-
-| Feature | Description |
-|---------|-------------|
-| **k-furcation support** | Works for any number of fate branches (k ≥ 2) |
-| **Radial star embedding** | Progenitor at origin, each fate on its own arm, cells ordered by pseudotime / CytoTRACE2 |
-| **unCS / nCS** | Pairwise commitment scores, unnormalized and cell-count-corrected |
-| **Per-fate entropy** | Binary cell entropy per fate — how decisive cells are toward each fate individually |
-| **NN-smoothed entropy** | Nearest-neighbor smoothed per-cell entropy in the scCS embedding; elbow plots to choose k |
-| **Driver genes** | Velocity-based, DEG-based, and velocity-fate correlation drivers per fate arm |
-| **Pathway enrichment** | Enrichr ORA (KEGG, GO BP, Reactome) per fate, up and down |
-| **Multi-condition analysis** | `PairScorer` for comparing commitment across conditions |
-| **Color map support** | Pass your original scanpy/Seurat cluster colors to all plots |
-
----
-
-## Entropy metrics
-
-scCS provides three complementary entropy metrics:
-
-```python
-# 1. Population entropy — single scalar, aggregate velocity-mass balance
-result.population_entropy
-
-# 2. Per-fate cell entropy — shape (k,), one value per fate
-#    Binary entropy of each cell's affinity toward fate j, averaged over cells
-result.per_fate_entropy   # e.g. array([0.31, 0.28]) for k=2
-
-# 3. NN-smoothed per-cell entropy — shape (n_cells,)
-#    Average cell_scores over k nearest neighbors in X_sccs, then compute entropy
-result = scorer.score(cell_level=True, k_nn=15)
-result.nn_cell_entropy    # also stored in adata_sub.obs["cs_nn_entropy"]
-
-# Find the optimal k_nn with elbow plots
-fig = scorer.plot_nn_entropy_elbow(k_nn_range=range(5, 51, 5))
-```
-
----
-
-## Full workflow — single condition
-
-```python
-import scCS
-
-# 1. Initialize
-scorer = scCS.SingleScorer(
-    adata,
-    root="17",
-    branches=["homeostatic", "activated"],
-    obs_key="leiden",
+    root=("Ngn3 high EP", "Pre-endocrine"),
+    branches=["Alpha", "Beta", "Delta", "Epsilon"],
+    obs_key="clusters",
 )
 
-# 2. Build radial star embedding
-scorer.build_embedding(ordering_metric="pseudotime")
+# Any validated continuous ordering may be used: latent time, velocity
+# pseudotime, diffusion pseudotime, Palantir pseudotime, or another justified
+# progression coordinate.
+scorer.build_embedding(ordering_metric="latent_time")
 
-# Optional: recompute pseudotime on the subset subgraph for better arm coverage
-scorer.compute_local_pseudotime(scale_01=True)
-scorer.refit_pseudotime()
-
-# 3. Fit (builds FateMap, projects velocity)
-scorer.fit()
-
-# 4. Score
-result = scorer.score(cell_level=True, k_nn=15, n_bootstrap=500)
-print(result.summary())
-
-# 5. Plots
-scorer.plot_star(result)
-scorer.plot_commitment_bar(result)
-scorer.plot_rose(result)
-scorer.plot_pairwise_cs(result)
-scorer.plot_nn_entropy_elbow(k_nn_range=range(5, 51, 5))
-
-# 6. Driver genes
-vel_drivers = scorer.get_velocity_drivers(n_top_genes=50)
-deg_drivers = scorer.get_deg_drivers(n_top_genes=50)
-vf_drivers  = scorer.get_velocity_fate_drivers(result, n_top_genes=50)
-
-# 7. Pathway enrichment
-enrichment = scorer.get_enrichment(deg_drivers, organism="mouse")
-
-# 8. Compare across subsets
-subset_results = scorer.score_per_subset(split_by="condition")
-scorer.plot_subset_comparison(subset_results)
-
-# 9. Transfer labels to full adata
-scorer.transfer_labels(adata, result)
-```
-
----
-
-## Multi-condition analysis
-
-```python
-import scCS
-
-# Initialize with condition key
-mscorer = scCS.PairScorer(
-    adata,
-    root="17",
-    branches=["homeostatic", "activated"],
-    condition_obs_key="treatment",   # column with condition labels
-    obs_key="leiden",
+scorer.fit(
+    scoring_mode="future_fate",
+    future_fate_options={
+        "effective_horizon": 64,
+        "anchor_quantile": 0.90,
+        "min_anchor_cells": 10,
+        "progression_scale": "rank",
+    },
 )
 
-# Build SHARED embedding on pooled data (critical for comparability)
-mscorer.build_embedding(ordering_metric="pseudotime")
-mscorer.refit_pseudotime(scale_01=False)  # preserve absolute pseudotime ordering
-mscorer.fit()
-
-# Score each condition separately
-results = mscorer.score_all_conditions(cell_level=True)
-
-# Statistical comparison
-delta = mscorer.compute_delta_CS("control", "treated", n_bootstrap=500)
-stats = mscorer.compare_conditions(results, pval_threshold=0.05)
-shift = mscorer.trajectory_shift(results)
-lme   = mscorer.fit_mixed_model(results, replicate_key="sample_id")
-
-# Visualizations
-mscorer.plot_star_grid(results)                    # side-by-side star plots
-mscorer.plot_rose_grid(results)                    # per-condition rose plots
-mscorer.plot_affinity_distributions(results)       # violin plots per fate
-mscorer.plot_delta_cs_heatmap(delta)               # ΔCS heatmap with CI
-mscorer.plot_compare_conditions_bar(results)       # grouped bar chart of nCS
-mscorer.plot_commitment_vector_radar(results)      # radar chart of commitment vectors
-mscorer.plot_trajectory_shift(shift)               # KDE plots of pseudotime shift
-```
-
----
-
-## Driver genes
-
-scCS provides three complementary driver gene methods:
-
-```python
-# 1. Velocity-based: rank genes by mean velocity in each fate arm
-vel_drivers = scorer.get_velocity_drivers(n_top_genes=50)
-
-# 2. DEG-based: Wilcoxon test, fate arm vs progenitor
-deg_drivers = scorer.get_deg_drivers(
-    n_top_genes=50,
-    pval_threshold=0.05,
-    logfc_threshold=0.25,
-)
-
-# 3. Velocity-fate correlation (CellRank-style):
-#    Spearman r between gene velocity and per-cell fate affinity
-#    Requires cell_level=True in score()
-result = scorer.score(cell_level=True)
-vf_drivers = scorer.get_velocity_fate_drivers(
-    result,
-    n_top_genes=50,
-    pval_threshold=0.05,
-)
-# Returns dict: fate_name -> DataFrame[gene, spearman_r, pval_adj, ...]
-```
-
----
-
-## Visualizations
-
-| Function | Description |
-|----------|-------------|
-| `plot_star_embedding()` | Radial star layout, colored by fate/pseudotime/entropy/affinity |
-| `plot_star_panels()` | Multi-panel star embedding |
-| `plot_rose()` | Polar rose of cumulative velocity magnitudes |
-| `plot_rose_grid()` | Per-condition rose grid (shared radial scale) |
-| `plot_pairwise_cs()` | Heatmap of pairwise nCS/unCS |
-| `plot_commitment_bar()` | Bar chart of unCS vs nCS per fate pair |
-| `plot_commitment_heatmap()` | Per-cell fate affinity heatmap |
-| `plot_subset_comparison()` | CS comparison across subsets |
-| `plot_expression_trends()` | Gene expression vs pseudotime/affinity |
-| `plot_nn_entropy_elbow()` | Elbow plots for choosing k_nn |
-| `plot_affinity_distributions()` | Violin/box plots of per-cell affinities by condition |
-| `plot_delta_cs_heatmap()` | ΔCS heatmap with bootstrap CI annotation |
-| `plot_compare_conditions_bar()` | Grouped bar chart of nCS per condition |
-| `plot_commitment_vector_radar()` | Radar chart of commitment vectors per condition |
-| `plot_trajectory_shift()` | KDE plots of pseudotime distributions by condition |
-| `plot_omnibus_summary()` | Fates × conditions heatmap with omnibus significance |
-| `plot_posthoc_heatmap()` | Condition × condition post-hoc p-value heatmap per fate |
-| `plot_pairwise_delta_grid()` | Grid of ΔCS heatmaps for all condition pairs |
-
----
-
-## Manuscript values
-
-Reproducing the k=2 microglia bifurcation from Kriukov et al. (2025)
-(GEO: [GSE285564](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE285564)):
-
-```python
-scorer = scCS.SingleScorer(
-    adata,
-    root="17",
-    branches=["homeostatic", "activated"],
-    obs_key="leiden",
-)
-scorer.build_embedding(ordering_metric="pseudotime")
-scorer.fit()
 result = scorer.score()
+print(result.summary())
 
-result.pairwise_unCS[0, 1]  # → 9.335
-result.pairwise_nCS[0, 1]   # → 8.066
+scorer.plot_star(result, color_by="future_fate_reach")
+scorer.plot_star(result, color_by="future_fate_specificity")
+scorer.plot_star(result, color_by="reach_supported_specificity")
+scorer.plot_star(result, color_by="signed_progression")
+scorer.plot_star(result, color_by="future_fate_affinity:Beta")
 ```
 
----
+The established metric names remain available for compatibility. In future-fate
+mode their explicit meanings are:
+
+| Compatibility name | Future-fate meaning |
+|---|---|
+| `directional_affinity` | future-fate affinity |
+| `commitment_strength` | future-fate reach |
+| `directional_entropy` | future-fate entropy |
+| `directional_specificity` | future-fate specificity |
+| `specific_commitment` | reach-supported specificity |
+| `commitment_contribution` | discounted fate probability by fate |
+| `progression_velocity` | signed ordering progression |
+| `transition_coverage` | one-step selected-path coverage |
+
+Additional read-only terminology aliases are available as
+`conditional_fate_affinity`, `discounted_fate_reach`, `resolved_commitment`,
+`signed_ordering_flux`, and `unresolved_future_probability`.
+
+Condition scorers also accept explicit aliases such as
+`metric="future_fate_affinity"`, `metric="future_fate_reach"`, and
+`metric="reach_supported_specificity"`.
+
+## Optional competing outcomes
+
+Competing outcomes are never guessed silently. Supply them as full-data Boolean
+masks or full-data indices when they are biologically justified:
+
+```python
+scorer.fit(
+    scoring_mode="future_fate",
+    future_fate_options={
+        "effective_horizon": 64,
+        "competing_outcomes": {
+            "Sensory": adata.obs["assignments"].eq("Sensory").to_numpy(),
+            "Sympathetic": adata.obs["assignments"].eq("Symp").to_numpy(),
+        },
+    },
+)
+```
+
+Without explicit competitors, unmodelled futures remain unresolved. This is safer
+than automatically converting large annotated groups into terminal outcomes.
+
+## Quick start: instantaneous scoring
+
+```python
+scorer.build_embedding(ordering_metric="latent_time")
+scorer.fit(scoring_mode="instantaneous")
+instantaneous = scorer.score()
+
+scorer.plot_star(instantaneous, color_by="affinity:Beta")
+scorer.plot_direction_strength_map(instantaneous)
+scorer.plot_rose(instantaneous)
+```
+
+Scientific velocity-vector diagnostics, rose plots derived from velocity angles,
+and scVelo grids on the display star are defined only for instantaneous mode.
+Future-fate mode deliberately does not manufacture a star-space scientific
+velocity vector.
+
+## Choosing an ordering
+
+The ordering is a supervised model input, not an estimate invented by scCS.
+Use a continuous coordinate that is coherent for the selected trajectory and
+oriented so larger values mean later progression. Typical choices include:
+
+- dynamical latent time;
+- velocity pseudotime;
+- diffusion pseudotime;
+- Palantir pseudotime;
+- CytoTRACE-derived ordering;
+- experimentally justified continuous developmental time.
+
+Validate the ordering against independent biology whenever possible. A smooth
+star is not evidence that an ordering is correct.
+
+## Interpreting complex branches
+
+Unusual branch dynamics are not automatically errors.
+
+- **Retrograde branch:** strong fate affinity with negative signed progression.
+- **Loop or turn:** fate identity may remain stable while progression changes sign.
+- **Mixed branch:** low specificity or low probability margin may be biologically real.
+- **Non-sink-like endpoint:** anchor diagnostics warn that late annotated cells
+  transition toward root, another fate, or outside the selected path.
+
+Anchor diagnostics are warnings for interpretation, not requirements that all
+terminal populations behave as simple outward sinks.
+
+## Pairwise and multi-condition inference
+
+`PairScorer` and `MultiScorer` fit one pooled scientific model and perform formal
+inference on biological-replicate summaries.
+
+```python
+pair = scCS.PairScorer(
+    adata,
+    root="Common Progenitor",
+    branches=["Gut", "Gut neuron", "ChC"],
+    obs_key="cell_type_new",
+    condition_obs_key="condition",
+    replicate_obs_key="sample_id",
+)
+pair.build_embedding(ordering_metric="inverse_cytotrace_pseudotime")
+pair.fit(
+    scoring_mode="future_fate",
+    future_fate_options={"effective_horizon": 64},
+)
+condition_results = pair.score_all_conditions(population="root")
+
+stats = pair.compare_conditions(
+    condition_results,
+    metric="future_fate_affinity",
+    fate="ChC",
+)
+```
+
+Formal inference requires biological replicates. Cell-level values are descriptive
+and enter only the within-replicate level of the hierarchical bootstrap. At least
+four, and preferably five to six or more, independent replicates per condition are
+recommended.
+
+## Why this method
+
+The methodological tutorials document the alternatives tested during development:
+
+1. direct transition pushforward into fixed star vertices;
+2. continuous straight branch coordinates;
+3. scVelo projection onto the display star;
+4. re-fitting neighbors or velocity on scCS coordinates;
+5. local trajectory-tangent straightening;
+6. first-exit absorbing models;
+7. unlimited full-graph absorption;
+8. discounted future-fate hitting probabilities.
+
+The selected method preserves source-graph dynamics, allows leave-and-return paths,
+avoids circular neighborhoods defined by the supervised star, does not force loops
+or retrograde branches to look outward, and stabilizes before unlimited graph mixing.
+See **Method selection** in the documentation and the package-backed decision notebook.
+
+## Documentation and tutorials
+
+The repository contains six complete dataset-specific scorer guides:
+
+- pancreas SingleScorer;
+- RegVelo Schwann SingleScorer;
+- pancreas PairScorer;
+- RegVelo Schwann PairScorer;
+- pancreas MultiScorer;
+- RegVelo Schwann MultiScorer.
+
+It also contains:
+
+- a visual DFFP method-selection tutorial;
+- a visual guide to turning, loop-like, mixed, and retrograde branches;
+- a package-backed pancreas and Schwann method-decision reproduction;
+- dedicated pancreas and Schwann downstream-analysis tutorials;
+- a single-process, in-memory, no-chunking scalability notebook whose exact
+  target ladder extends to 200 million cells.
+
+Each primary notebook loads its public dataset directly and recomputes RNA velocity;
+no hidden tutorial cache is assumed. The Schwann tutorials use dynamical velocity as
+their primary model. Every guide covers ordering validation, preflight diagnostics,
+discounted future-fate scoring, anchor and horizon sensitivity, population and
+cell-level visualization, native/display velocity QC, gene-expression visualization,
+replicate-aware inference where applicable, and reproducible export. PairScorer and
+MultiScorer notebooks include a clearly labeled controlled demonstration mode and a
+separate real-study path requiring genuine condition and biological-replicate
+metadata.
+
+The repository also contains a method-selection tutorial explaining rejected
+alternatives, a guide to complex/loop-like/retrograde branches, and the package-API
+reproduction of the pancreas and RegVelo Schwann decision benchmark, together with
+API reference, diagnostics, scalability guidance, and release notes.
+
+Documentation: https://sccs-py.readthedocs.io/
+
+## Scope and limitations
+
+- scCS is supervised and does not discover topology.
+- Future-fate results depend on the velocity graph, ordering, fate annotations,
+  endpoint-anchor definition, and effective horizon.
+- `effective_horizon=64` is a validated default, not a universal biological time unit.
+- Endpoint anchors need not be perfect sinks, but weak sink behavior should be reported.
+- Paired and repeated-measure condition designs are not silently approximated.
+- Gene associations are candidate associations, not causal lineage drivers.
+- The star is a standardized display; it is not an inverse map of UMAP or gene space.
 
 ## Citation
 
-If you use scCS in your research, please cite:
+A manuscript describing the redesigned method is in preparation. Until then, cite
+the software repository and record the exact package version, scoring mode, ordering,
+effective horizon, anchor quantile, and velocity model used in the analysis.
 
-> Kriukov et al. (2025) *Single-cell transcriptome of myeloid cells in response
-> to transplantation of human retinal neurons reveals reversibility of microglial
-> activation.* DOI: 10.XXXX
+
+## Exact 200-million-cell no-chunk run
+
+The scalability tutorial measures complete in-memory DFFP problems only. On a
+high-memory host, set `SCCS_SCALABILITY_PROFILE=exact_200m` before running the
+scalability notebook, or use
+`benchmarks/v08/run_dffp_200m_no_chunk.py`. The runner fails when the entire
+problem cannot be allocated; it never substitutes a chunked calculation.

@@ -1,378 +1,468 @@
-"""
-enrichment.py — Pathway enrichment analysis for scCS fate arms.
+"""Reproducible pathway and regulon enrichment for scCS v0.8.
 
-Runs Enrichr ORA (over-representation analysis) on DEG driver genes
-for each fate arm, separately for up- and down-regulated genes.
-
-Default gene sets (mouse):
-  - KEGG_2019_Mouse
-  - GO_Biological_Process_2021
-  - Reactome_2022
-
-Requires gseapy >= 1.0.  Install with: pip install gseapy
-
-Results are returned as DataFrames and optionally visualized as dot plots
-(dot size = gene ratio, color = -log10 adjusted p-value).
+Local gene-set mappings and GMT files are the preferred reproducible input.
+Remote Enrichr libraries remain optional and are clearly recorded as a remote,
+version-unstable source.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional, Sequence, Union
 import warnings
-from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+from scipy.stats import fisher_exact
+
+from .drivers import CommitmentGeneAssociationResult
+
+GeneSetInput = Union[Mapping[str, Sequence[str]], str, Path, Sequence[str]]
 
 
-# Default gene sets per organism
-_DEFAULT_GENE_SETS = {
-    "mouse": [
-        "KEGG_2019_Mouse",
-        "GO_Biological_Process_2021",
-        "Reactome_2022",
-    ],
-    "human": [
-        "KEGG_2021_Human",
-        "GO_Biological_Process_2021",
-        "Reactome_2022",
-    ],
-}
+@dataclass(frozen=True)
+class CommitmentEnrichmentResult:
+    """Enrichment tables and provenance for one scCS gene analysis."""
+
+    tables: Mapping[str, pd.DataFrame]
+    metadata: Mapping[str, Any]
+
+    def top(self, target: str, n: int = 20, *, significant_only: bool = True) -> pd.DataFrame:
+        if target not in self.tables:
+            raise KeyError(f"Unknown target {target!r}; available: {list(self.tables)}")
+        table = self.tables[target]
+        if significant_only:
+            table = table[table["significant"]]
+        return table.head(int(n)).copy()
+
+    def export(self, output_dir: Union[str, Path], prefix: str = "sccs_enrichment") -> list[str]:
+        import json
+
+        output = Path(output_dir)
+        output.mkdir(parents=True, exist_ok=True)
+        paths: list[str] = []
+        for target, table in self.tables.items():
+            safe = _safe_name(target)
+            path = output / f"{prefix}_{safe}.csv"
+            table.to_csv(path, index=False)
+            paths.append(str(path))
+        metadata_path = output / f"{prefix}_metadata.json"
+        metadata_path.write_text(json.dumps(dict(self.metadata), indent=2, default=str))
+        paths.append(str(metadata_path))
+        return paths
 
 
-def _resolve_gene_sets(
-    gene_sets: List[str],
-    organism: str,
-) -> List[str]:
-    """Resolve gene set names, falling back to fuzzy matching if a name is stale.
+def _safe_name(value: object) -> str:
+    text = str(value).strip().replace(" ", "_").replace("/", "_")
+    return "".join(character for character in text if character.isalnum() or character in "_-.")
 
-    Enrichr gene set names include year suffixes (e.g., ``KEGG_2021_Human``)
-    that change as the database is updated.  This helper:
 
-    1. Returns the names as-is if they appear valid (no network check).
-    2. If ``gseapy.get_library_name()`` is available, checks whether each
-       name exists in the current Enrichr library list.  If a name is not
-       found, strips the year suffix and looks for a fuzzy match.
-    3. Warns the user if a substitution was made.
+def _bh_adjust(pvalues: np.ndarray) -> np.ndarray:
+    values = np.asarray(pvalues, dtype=float)
+    adjusted = np.full(values.shape, np.nan, dtype=float)
+    valid = np.isfinite(values)
+    if not valid.any():
+        return adjusted
+    p = np.clip(values[valid], 0.0, 1.0)
+    order = np.argsort(p)
+    ranked = p[order]
+    n = len(ranked)
+    q = ranked * n / np.arange(1, n + 1)
+    q = np.minimum.accumulate(q[::-1])[::-1]
+    q = np.clip(q, 0.0, 1.0)
+    inverse = np.empty(n, dtype=int)
+    inverse[order] = np.arange(n)
+    adjusted[valid] = q[inverse]
+    return adjusted
 
-    Parameters
-    ----------
-    gene_sets : list of str
-    organism : str
 
-    Returns
-    -------
-    resolved : list of str
-    """
-    try:
-        import gseapy as gp
-        available = gp.get_library_name(organism=organism)
-        available_set = set(available)
-    except Exception:
-        # Can't reach Enrichr or gseapy not installed — return as-is
-        return gene_sets
-
-    resolved = []
-    for gs in gene_sets:
-        if gs in available_set:
-            resolved.append(gs)
-        else:
-            # Strip year suffix and try fuzzy match
-            import re as _re
-            base = _re.sub(r"_\d{4}(_\w+)?$", "", gs)
-            candidates = [a for a in available if a.startswith(base)]
-            if candidates:
-                best = sorted(candidates)[-1]  # pick most recent year
+def load_gmt(path: Union[str, Path]) -> Dict[str, set[str]]:
+    """Load a GMT file into a term-to-gene mapping."""
+    source = Path(path)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    gene_sets: Dict[str, set[str]] = {}
+    with source.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 3:
                 warnings.warn(
-                    f"Gene set '{gs}' not found in Enrichr library list. "
-                    f"Using '{best}' instead. "
-                    "Update _DEFAULT_GENE_SETS in enrichment.py to silence this.",
-                    UserWarning,
-                    stacklevel=3,
-                )
-                resolved.append(best)
-            else:
-                warnings.warn(
-                    f"Gene set '{gs}' not found in Enrichr library list and no "
-                    f"fuzzy match found for base '{base}'. Keeping original name.",
-                    UserWarning,
-                    stacklevel=3,
-                )
-                resolved.append(gs)
-
-    return resolved
-
-
-def run_enrichment_per_fate(
-    deg_drivers: Dict[str, pd.DataFrame],
-    fate_names: Optional[List[str]] = None,
-    gene_sets: Optional[List[str]] = None,
-    organism: str = "mouse",
-    pval_threshold: float = 0.05,
-    logfc_threshold: float = 0.25,
-    plot: bool = True,
-    n_top_pathways: int = 15,
-) -> Dict[str, Dict[str, pd.DataFrame]]:
-    """Run Enrichr ORA on DEG driver genes for each fate arm.
-
-    Runs separately for up-regulated and down-regulated genes.
-    Requires gseapy >= 1.0.
-
-    Parameters
-    ----------
-    deg_drivers : dict
-        Output of get_deg_drivers().
-        fate_name -> DataFrame[gene, logfoldchange, pval, pval_adj, significant]
-    fate_names : list of str, optional
-        Terminal fate cluster labels (determines iteration order).  If
-        omitted (default ``None``), the fate names are inferred from
-        ``deg_drivers.keys()`` in their natural insertion order.  If
-        provided but missing entries that appear in ``deg_drivers``, a
-        warning is emitted and only the intersection is used.
-    gene_sets : list of str, optional
-        Enrichr gene set library names.  Defaults to KEGG + GO BP + Reactome
-        for the specified organism.
-    organism : str
-        'mouse' or 'human'.  Used for default gene sets and Enrichr organism.
-    pval_threshold : float
-        Adjusted p-value threshold for reporting enriched terms.
-    logfc_threshold : float
-        Minimum absolute logFC used to split up/down gene lists.
-    plot : bool
-        If True, generate dot plots per fate per direction.
-    n_top_pathways : int
-        Number of top enriched terms to show in dot plots.
-
-    Returns
-    -------
-    dict : fate_name -> {'up': DataFrame, 'down': DataFrame}
-        Each DataFrame has columns:
-        [Gene_set, Term, Overlap, P-value, Adjusted P-value, Genes]
-        Sorted by Adjusted P-value ascending.
-        Empty DataFrame if no significant terms found.
-    """
-    try:
-        import gseapy as gp
-    except ImportError:
-        raise ImportError(
-            "gseapy is required for pathway enrichment. "
-            "Install with: pip install gseapy"
-        )
-
-    if gene_sets is None:
-        org_key = organism.lower()
-        if org_key not in _DEFAULT_GENE_SETS:
-            raise ValueError(
-                f"Unknown organism '{organism}'. "
-                f"Supported: {list(_DEFAULT_GENE_SETS.keys())}"
-            )
-        gene_sets = _DEFAULT_GENE_SETS[org_key]
-
-    # Resolve gene set names — substitutes stale year-suffixed names if needed
-    gene_sets = _resolve_gene_sets(gene_sets, organism)
-
-    # Default / validate fate_names against deg_drivers keys
-    deg_keys = list(deg_drivers.keys())
-    if fate_names is None:
-        fate_names = deg_keys
-    else:
-        provided = list(fate_names)
-        missing = [n for n in provided if n not in deg_drivers]
-        extra_in_dict = [n for n in deg_keys if n not in provided]
-        if missing or extra_in_dict:
-            warnings.warn(
-                "run_enrichment_per_fate: fate_names and deg_drivers.keys() "
-                f"do not match.  Missing from deg_drivers: {missing}.  "
-                f"In deg_drivers but not in fate_names: {extra_in_dict}.  "
-                "Using only fates present in both.",
-                UserWarning,
-                stacklevel=2,
-            )
-        fate_names = [n for n in provided if n in deg_drivers]
-
-    enrichment_results: Dict[str, Dict[str, pd.DataFrame]] = {}
-
-    for name in fate_names:
-        if name not in deg_drivers:
-            warnings.warn(
-                f"Fate '{name}' not found in deg_drivers. Skipping enrichment.",
-                stacklevel=2,
-            )
-            continue
-
-        df = deg_drivers[name]
-        sig = df[df["significant"]]
-
-        up_genes = sig[sig["logfoldchange"] > logfc_threshold]["gene"].tolist()
-        down_genes = sig[sig["logfoldchange"] < -logfc_threshold]["gene"].tolist()
-
-        print(f"\n{'='*60}")
-        print(f"  Pathway enrichment: {name}")
-        print(f"  Gene sets: {gene_sets}")
-        print(f"  Up-regulated genes  : {len(up_genes)}")
-        print(f"  Down-regulated genes: {len(down_genes)}")
-        print(f"{'='*60}")
-
-        fate_results: Dict[str, pd.DataFrame] = {}
-
-        for direction, gene_list in [("up", up_genes), ("down", down_genes)]:
-            if len(gene_list) < 5:
-                print(
-                    f"  [{direction}] Too few genes ({len(gene_list)}), "
-                    "skipping enrichment (need ≥5)."
-                )
-                fate_results[direction] = pd.DataFrame()
-                continue
-
-            try:
-                enr = gp.enrichr(
-                    gene_list=gene_list,
-                    gene_sets=gene_sets,
-                    organism=organism,
-                    outdir=None,
-                    cutoff=pval_threshold,
-                )
-                res = enr.results.copy()
-                res = res[res["Adjusted P-value"] < pval_threshold].copy()
-                res = res.sort_values("Adjusted P-value").reset_index(drop=True)
-                fate_results[direction] = res
-
-                n_sig = len(res)
-                print(f"\n  [{direction}] Significant terms: {n_sig}")
-                if n_sig > 0:
-                    print(
-                        res[["Gene_set", "Term", "Overlap", "Adjusted P-value"]]
-                        .head(10)
-                        .to_string(index=False)
-                    )
-
-            except Exception as e:
-                warnings.warn(
-                    f"Enrichr failed for fate '{name}' [{direction}]: {e}",
+                    f"Ignoring malformed GMT line {line_number} in {source}.",
+                    RuntimeWarning,
                     stacklevel=2,
                 )
-                fate_results[direction] = pd.DataFrame()
+                continue
+            term = fields[0].strip()
+            genes = {gene.strip() for gene in fields[2:] if gene.strip()}
+            if term and genes:
+                gene_sets[term] = genes
+    if not gene_sets:
+        raise ValueError(f"No usable gene sets were found in {source}.")
+    return gene_sets
 
-        enrichment_results[name] = fate_results
 
-        if plot:
-            _plot_enrichment_dotplot(name, fate_results, n_top_pathways=n_top_pathways)
+def _normalise_gene_sets(gene_sets: GeneSetInput):
+    if isinstance(gene_sets, Mapping):
+        mapping = {
+            str(term): {str(gene) for gene in genes if str(gene)}
+            for term, genes in gene_sets.items()
+        }
+        mapping = {term: genes for term, genes in mapping.items() if genes}
+        if not mapping:
+            raise ValueError("gene_sets mapping contains no non-empty sets.")
+        return mapping, {"source_type": "local_mapping", "source": "in_memory"}
+    if isinstance(gene_sets, (str, Path)):
+        path = Path(gene_sets)
+        if path.exists():
+            return load_gmt(path), {"source_type": "local_gmt", "source": str(path.resolve())}
+        return None, {"source_type": "remote_enrichr", "libraries": [str(gene_sets)]}
+    libraries = [str(value) for value in gene_sets]
+    if not libraries:
+        raise ValueError("gene_sets sequence is empty.")
+    return None, {"source_type": "remote_enrichr", "libraries": libraries}
 
-    return enrichment_results
+
+def _association_tables(
+    gene_results: Union[CommitmentGeneAssociationResult, Mapping[str, pd.DataFrame]],
+) -> tuple[Mapping[str, pd.DataFrame], Mapping[str, Any]]:
+    if isinstance(gene_results, CommitmentGeneAssociationResult):
+        return gene_results.tables, gene_results.metadata
+    return gene_results, {}
 
 
-# ---------------------------------------------------------------------------
-# Internal: dot plot
-# ---------------------------------------------------------------------------
+def _effect_column(table: pd.DataFrame) -> str:
+    for column in ("effect", "logfoldchange", "score"):
+        if column in table:
+            return column
+    raise ValueError("Gene table must contain 'effect', 'logfoldchange', or 'score'.")
 
-def _plot_enrichment_dotplot(
-    fate_name: str,
-    fate_results: Dict[str, pd.DataFrame],
-    n_top_pathways: int = 15,
-    figsize_per_panel: tuple = (10, 5),
-) -> None:
-    """Draw dot plots for up- and down-regulated enrichment results."""
-    try:
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-    except ImportError:
-        warnings.warn("matplotlib/seaborn not available. Skipping dot plot.", stacklevel=2)
-        return
 
-    for direction in ["up", "down"]:
-        res = fate_results.get(direction, pd.DataFrame())
-        if res is None or res.empty:
+def _pvalue_column(table: pd.DataFrame) -> Optional[str]:
+    for column in ("pvalue_adj", "pval_adj", "pvals_adj"):
+        if column in table:
+            return column
+    return None
+
+
+def _query_genes(
+    table: pd.DataFrame,
+    *,
+    direction: str,
+    effect_threshold: float,
+    fdr_threshold: float,
+    significant_only: bool,
+    max_genes: Optional[int],
+) -> list[str]:
+    effect_column = _effect_column(table)
+    selected = table.copy()
+    if significant_only:
+        if "significant" in selected:
+            selected = selected[selected["significant"].astype(bool)]
+        else:
+            p_column = _pvalue_column(selected)
+            if p_column is None:
+                raise ValueError("significant_only=True but no significance column is available.")
+            selected = selected[selected[p_column] < fdr_threshold]
+    if direction == "positive":
+        selected = selected[selected[effect_column] >= effect_threshold]
+        selected = selected.sort_values(effect_column, ascending=False)
+    elif direction == "negative":
+        selected = selected[selected[effect_column] <= -effect_threshold]
+        selected = selected.sort_values(effect_column, ascending=True)
+    elif direction == "both":
+        selected = selected[selected[effect_column].abs() >= effect_threshold]
+        selected = selected.assign(_absolute=selected[effect_column].abs()).sort_values(
+            "_absolute", ascending=False
+        )
+    else:
+        raise ValueError("direction must be 'positive', 'negative', or 'both'.")
+    if max_genes is not None:
+        selected = selected.head(int(max_genes))
+    return pd.unique(selected["gene"].astype(str)).tolist()
+
+
+def _local_ora(
+    query: Sequence[str],
+    gene_sets: Mapping[str, set[str]],
+    background: set[str],
+    *,
+    min_set_size: int,
+    max_set_size: Optional[int],
+    fdr_threshold: float,
+) -> pd.DataFrame:
+    universe = set(background)
+    query_set = set(query) & universe
+    rows = []
+    for term, raw_genes in gene_sets.items():
+        set_genes = set(raw_genes) & universe
+        if len(set_genes) < min_set_size:
             continue
-
-        plot_df = res.head(n_top_pathways).copy()
-        plot_df["-log10(padj)"] = -np.log10(
-            plot_df["Adjusted P-value"].clip(1e-300)
+        if max_set_size is not None and len(set_genes) > max_set_size:
+            continue
+        overlap = query_set & set_genes
+        a = len(overlap)
+        b = len(query_set - set_genes)
+        c = len(set_genes - query_set)
+        d = len(universe - query_set - set_genes)
+        odds_ratio, pvalue = fisher_exact([[a, b], [c, d]], alternative="greater")
+        expected = (len(query_set) * len(set_genes) / len(universe)) if universe else np.nan
+        rows.append(
+            {
+                "term": str(term),
+                "overlap": a,
+                "query_size": len(query_set),
+                "gene_set_size": len(set_genes),
+                "background_size": len(universe),
+                "expected_overlap": expected,
+                "odds_ratio": float(odds_ratio),
+                "pvalue": float(pvalue),
+                "genes": ";".join(sorted(overlap)),
+                "gene_ratio": a / len(query_set) if query_set else np.nan,
+            }
         )
-
-        def _parse_ratio(s: str) -> float:
-            try:
-                a, b = str(s).split("/")
-                return int(a) / int(b)
-            except Exception:
-                return 0.0
-
-        plot_df["gene_ratio"] = plot_df["Overlap"].apply(_parse_ratio)
-
-        # Clean up gene set name for label prefix
-        plot_df = plot_df.sort_values(["Gene_set", "Adjusted P-value"])
-        plot_df["label"] = (
-            plot_df["Gene_set"]
-            .str.replace(r"_2019_Mouse|_2021|_2022|_2021_Human", "", regex=True)
-            + ": "
-            + plot_df["Term"].str[:55]
+    table = pd.DataFrame(rows)
+    if table.empty:
+        return pd.DataFrame(
+            columns=[
+                "term",
+                "overlap",
+                "query_size",
+                "gene_set_size",
+                "background_size",
+                "expected_overlap",
+                "odds_ratio",
+                "pvalue",
+                "pvalue_adj",
+                "genes",
+                "gene_ratio",
+                "significant",
+            ]
         )
+    table["pvalue_adj"] = _bh_adjust(table["pvalue"].to_numpy(dtype=float))
+    table["significant"] = table["pvalue_adj"] < fdr_threshold
+    return table.sort_values(["pvalue_adj", "odds_ratio"], ascending=[True, False]).reset_index(
+        drop=True
+    )
 
-        fig, ax = plt.subplots(figsize=figsize_per_panel)
 
-        sc_ = ax.scatter(
-            plot_df["gene_ratio"],
-            range(len(plot_df)),
-            c=plot_df["-log10(padj)"],
-            s=plot_df["gene_ratio"] * 2000,
-            cmap="RdYlBu_r",
-            vmin=0,
-            edgecolors="grey",
-            linewidths=0.4,
-            zorder=3,
+def _remote_enrichr(
+    query: Sequence[str],
+    libraries: Sequence[str],
+    *,
+    organism: str,
+    fdr_threshold: float,
+) -> pd.DataFrame:
+    try:
+        import gseapy as gp
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            "Remote Enrichr analysis requires gseapy. Install scCS-py[enrichment]."
+        ) from exc
+    warnings.warn(
+        "Remote Enrichr libraries can change over time. For publication-grade "
+        "reproducibility, use a local GMT file or in-memory gene-set mapping.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+    result = gp.enrichr(
+        gene_list=list(query),
+        gene_sets=list(libraries),
+        organism=organism,
+        outdir=None,
+        cutoff=1.0,
+    ).results.copy()
+    if result.empty:
+        return result
+    rename = {
+        "Gene_set": "gene_set",
+        "Term": "term",
+        "Overlap": "overlap_text",
+        "P-value": "pvalue",
+        "Adjusted P-value": "pvalue_adj",
+        "Odds Ratio": "odds_ratio",
+        "Combined Score": "combined_score",
+        "Genes": "genes",
+    }
+    result = result.rename(columns={key: value for key, value in rename.items() if key in result})
+    if "overlap_text" in result:
+        split = result["overlap_text"].astype(str).str.split("/", expand=True)
+        result["overlap"] = pd.to_numeric(split[0], errors="coerce")
+        result["gene_set_size"] = pd.to_numeric(split[1], errors="coerce")
+        result["gene_ratio"] = result["overlap"] / len(set(query))
+    result["significant"] = result["pvalue_adj"] < fdr_threshold
+    return result.sort_values("pvalue_adj").reset_index(drop=True)
+
+
+def run_commitment_enrichment(
+    gene_results: Union[CommitmentGeneAssociationResult, Mapping[str, pd.DataFrame]],
+    *,
+    gene_sets: GeneSetInput,
+    background: Optional[Sequence[str]] = None,
+    direction: str = "positive",
+    effect_threshold: float = 0.0,
+    fdr_threshold: float = 0.05,
+    significant_only: bool = True,
+    max_genes: Optional[int] = 500,
+    min_query_genes: int = 5,
+    min_set_size: int = 5,
+    max_set_size: Optional[int] = 1000,
+    organism: str = "mouse",
+    verbose: bool = True,
+) -> CommitmentEnrichmentResult:
+    """Run local ORA or optional remote Enrichr on scCS gene tables.
+
+    The default background is the union of genes tested in the supplied
+    association tables, which is usually more appropriate than the whole
+    genome.  Pass an explicit assay-specific background for final analyses.
+    """
+    tables, association_metadata = _association_tables(gene_results)
+    local_gene_sets, source_metadata = _normalise_gene_sets(gene_sets)
+    if background is None:
+        background_set = {
+            str(gene)
+            for table in tables.values()
+            if "gene" in table
+            for gene in table["gene"].astype(str)
+        }
+        background_source = "union_of_tested_genes"
+    else:
+        background_set = {str(gene) for gene in background}
+        background_source = "user_supplied"
+    if not background_set:
+        raise ValueError("Enrichment background is empty.")
+
+    output: Dict[str, pd.DataFrame] = {}
+    query_sizes: Dict[str, int] = {}
+    for target, table in tables.items():
+        query = _query_genes(
+            table,
+            direction=direction,
+            effect_threshold=effect_threshold,
+            fdr_threshold=fdr_threshold,
+            significant_only=significant_only,
+            max_genes=max_genes,
         )
-        plt.colorbar(sc_, ax=ax, label="-log10(adj. p-value)", shrink=0.6)
+        query = [gene for gene in query if gene in background_set]
+        query_sizes[str(target)] = len(query)
+        if len(query) < min_query_genes:
+            warnings.warn(
+                f"Skipping enrichment for {target!r}: only {len(query)} eligible genes; "
+                f"need at least {min_query_genes}.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            output[str(target)] = pd.DataFrame()
+            continue
+        if local_gene_sets is not None:
+            table_result = _local_ora(
+                query,
+                local_gene_sets,
+                background_set,
+                min_set_size=min_set_size,
+                max_set_size=max_set_size,
+                fdr_threshold=fdr_threshold,
+            )
+            table_result.insert(0, "target", str(target))
+            table_result.insert(1, "direction", direction)
+        else:
+            table_result = _remote_enrichr(
+                query,
+                source_metadata["libraries"],
+                organism=organism,
+                fdr_threshold=fdr_threshold,
+            )
+            if not table_result.empty:
+                table_result.insert(0, "target", str(target))
+                table_result.insert(1, "direction", direction)
+        output[str(target)] = table_result
+        if verbose:
+            significant = (
+                int(table_result["significant"].sum())
+                if not table_result.empty and "significant" in table_result
+                else 0
+            )
+            print(
+                f"[scCS] Enrichment {target}: query_genes={len(query)}, "
+                f"significant_terms={significant}"
+            )
 
-        ax.set_yticks(range(len(plot_df)))
-        ax.set_yticklabels(plot_df["label"], fontsize=8)
-        ax.set_xlabel("Gene ratio (overlap / gene set size)")
-        ax.set_title(
-            f"Pathway enrichment: {fate_name}  [{direction}-regulated]\n"
-            f"(KEGG + GO BP + Reactome, {plot_df['Gene_set'].str.contains('Mouse').any() and 'mouse' or 'human'})",
-            fontsize=11,
-        )
-        ax.invert_yaxis()
-        ax.grid(axis="x", alpha=0.3)
-        sns.despine(ax=ax)
-        plt.tight_layout()
-        plt.show()
+    metadata: Dict[str, Any] = {
+        "scientific_scope": "overrepresentation_of_candidate_commitment_associated_genes",
+        "direction": direction,
+        "effect_threshold": float(effect_threshold),
+        "fdr_threshold": float(fdr_threshold),
+        "significant_only": bool(significant_only),
+        "max_genes": max_genes,
+        "background_source": background_source,
+        "background_size": len(background_set),
+        "query_sizes": query_sizes,
+        "gene_set_source": source_metadata,
+        "organism": organism,
+        "association_metadata": dict(association_metadata),
+    }
+    return CommitmentEnrichmentResult(tables=output, metadata=metadata)
 
 
-# ---------------------------------------------------------------------------
-# Export helper
-# ---------------------------------------------------------------------------
+def plot_enrichment_dotplot(
+    result: CommitmentEnrichmentResult,
+    target: str,
+    *,
+    n_terms: int = 15,
+    significant_only: bool = True,
+    ax=None,
+):
+    """Plot enriched terms for one target using matplotlib only."""
+    import matplotlib.pyplot as plt
+
+    if target not in result.tables:
+        raise KeyError(f"Unknown target {target!r}; available: {list(result.tables)}")
+    table = result.tables[target]
+    if significant_only and not table.empty and "significant" in table:
+        table = table[table["significant"]]
+    table = table.head(int(n_terms)).copy()
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8.0, max(3.0, 0.34 * max(1, len(table)) + 1.5)))
+    if table.empty:
+        ax.text(0.5, 0.5, "No enriched terms", ha="center", va="center", transform=ax.transAxes)
+        ax.set_axis_off()
+        return ax.figure
+    table = table.iloc[::-1]
+    x = -np.log10(table["pvalue_adj"].clip(lower=1e-300))
+    size = 40.0 + 260.0 * table["gene_ratio"].fillna(0.0).to_numpy(dtype=float)
+    scatter = ax.scatter(x, np.arange(len(table)), s=size, c=table["odds_ratio"], linewidths=0.4)
+    ax.set_yticks(np.arange(len(table)))
+    ax.set_yticklabels(table["term"].astype(str))
+    ax.set_xlabel("−log10 adjusted p-value")
+    ax.set_title(f"scCS commitment enrichment: {target}")
+    ax.grid(axis="x", alpha=0.25)
+    ax.figure.colorbar(scatter, ax=ax, label="Odds ratio")
+    return ax.figure
+
 
 def export_enrichment_tables(
-    enrichment_results: Dict[str, Dict[str, pd.DataFrame]],
-    output_dir: str = ".",
+    enrichment_results: Union[CommitmentEnrichmentResult, Mapping[str, pd.DataFrame]],
+    output_dir: Union[str, Path] = ".",
     prefix: str = "enrichment",
-) -> List[str]:
-    """Save enrichment result DataFrames to CSV files.
+) -> list[str]:
+    """Export enrichment tables; retained as a convenient public helper."""
+    if isinstance(enrichment_results, CommitmentEnrichmentResult):
+        return enrichment_results.export(output_dir, prefix=prefix)
+    return CommitmentEnrichmentResult(tables=enrichment_results, metadata={}).export(
+        output_dir, prefix=prefix
+    )
 
-    Parameters
-    ----------
-    enrichment_results : dict
-        Output of run_enrichment_per_fate().
-    output_dir : str
-        Directory to save files.
-    prefix : str
-        Filename prefix.
 
-    Returns
-    -------
-    list of str : paths of saved files.
-    """
-    import os
+# The established name remains as a concise alias, but v0.8 accepts generic
+# commitment-gene tables rather than only terminal-vs-root DEGs.
+run_enrichment_per_fate = run_commitment_enrichment
 
-    os.makedirs(output_dir, exist_ok=True)
-    saved = []
 
-    for fate_name, fate_results in enrichment_results.items():
-        safe_name = fate_name.replace(" ", "_").replace("/", "_")
-        for direction, df in fate_results.items():
-            if df is None or df.empty:
-                continue
-            fname = os.path.join(output_dir, f"{prefix}_{safe_name}_{direction}.csv")
-            df.to_csv(fname, index=False)
-            saved.append(fname)
-            print(f"Saved: {fname}")
-
-    return saved
+__all__ = [
+    "CommitmentEnrichmentResult",
+    "load_gmt",
+    "run_commitment_enrichment",
+    "run_enrichment_per_fate",
+    "plot_enrichment_dotplot",
+    "export_enrichment_tables",
+]

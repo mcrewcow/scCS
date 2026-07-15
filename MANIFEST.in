@@ -1,0 +1,8 @@
+include LICENSE README.md pyproject.toml CITATION.cff .readthedocs.yaml
+recursive-include docs *.rst *.py *.ipynb
+recursive-include tutorials *.ipynb
+recursive-include tests *.py
+recursive-include benchmarks *.py
+recursive-include scCS py.typed
+
+prune docs/_build

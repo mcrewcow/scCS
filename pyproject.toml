@@ -4,18 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scCS-py"
-version = "0.7.4"
-description = "Single-cell Commitment Scores with radial star embedding for k-furcation fate decisions, multi-condition analysis, and velocity-fate correlation drivers"
+version = "0.8.0"
+description = "Supervised single-cell commitment scoring at manually annotated furcations"
 readme = "README.md"
-requires-python = ">=3.9"
-license = {text = "MIT"}
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Emil Kriukov"}
 ]
 keywords = ["single-cell", "RNA velocity", "commitment scores", "fate decision", "scRNA-seq"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
@@ -24,20 +24,25 @@ dependencies = [
     "scipy>=1.10",
     "pandas>=1.5",
     "matplotlib>=3.7",
-    "seaborn>=0.12",
-    "anndata>=0.9",
-    "scanpy>=1.9",
-    "scikit-learn>=1.2",
-    "statsmodels>=0.14",
-    "scikit-posthocs>=0.8",
+    "anndata>=0.11",
+    "scanpy>=1.11",
 ]
 
+[project.urls]
+Homepage = "https://github.com/mcrewcow/scCS"
+Documentation = "https://sccs-py.readthedocs.io/"
+Repository = "https://github.com/mcrewcow/scCS"
+Issues = "https://github.com/mcrewcow/scCS/issues"
+Changelog = "https://sccs-py.readthedocs.io/en/latest/changelog.html"
+
 [project.optional-dependencies]
-velocity = ["scvelo>=0.2.5"]
+velocity = ["scvelo>=0.3.4"]
+drivers = ["statsmodels>=0.14"]
 enrichment = ["gseapy>=1.0"]
-all = ["scvelo>=0.2.5", "gseapy>=1.0", "cellrank>=2.0"]
+validation = ["scvelo>=0.3.4", "regvelo>=0.4.2"]
+all = ["scvelo>=0.3.4", "statsmodels>=0.14", "gseapy>=1.0"]
 docs = ["sphinx>=7", "sphinx-autoapi>=3", "furo", "nbsphinx", "ipykernel"]
-dev = ["pytest", "pytest-cov", "black", "ruff", "flake8", "sphinx>=7", "sphinx-autoapi>=3", "furo", "nbsphinx", "ipykernel"]
+dev = ["pytest", "pytest-cov", "black", "ruff", "build", "sphinx>=7", "sphinx-autoapi>=3", "furo", "nbsphinx", "ipykernel"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -45,3 +50,12 @@ include = ["scCS*"]
 
 [tool.setuptools.package-data]
 scCS = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E402"]
