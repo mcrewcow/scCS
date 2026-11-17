@@ -190,7 +190,9 @@ class Furcation:
         if not hasattr(adata, "obs"):
             raise TypeError("adata must expose an .obs table.")
         if self.obs_key not in adata.obs:
-            raise KeyError(f"Annotation column {self.obs_key!r} is missing from adata.obs.")
+            raise KeyError(
+                f"Annotation column {self.obs_key!r} is missing from adata.obs."
+            )
         return self.validate_labels(adata.obs[self.obs_key].to_numpy())
 
     def masks(self, labels: Sequence[object]) -> Dict[str, np.ndarray]:

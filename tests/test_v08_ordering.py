@@ -3,7 +3,6 @@ import numpy as np
 from scCS.furcation import Furcation
 from scCS.ordering import FurcationOrderingScaler
 
-
 LABELS = np.array(["Root", "Root", "A", "A", "B", "B"])
 ORDERING = np.array([0.0, 0.4, 0.6, 1.0, 0.7, 0.9])
 FURCATION = Furcation(obs_key="clusters", root="Root", terminals=["A", "B"])
@@ -36,7 +35,9 @@ def test_terminal_ordering_values_do_not_affect_scientific_root_transform():
         root_upper_quantile=1.0,
     ).fit_transform(permuted, LABELS, FURCATION)
 
-    np.testing.assert_allclose(first.root_progress, second.root_progress, atol=0, rtol=0)
+    np.testing.assert_allclose(
+        first.root_progress, second.root_progress, atol=0, rtol=0
+    )
     np.testing.assert_array_equal(first.terminal_names, second.terminal_names)
 
 

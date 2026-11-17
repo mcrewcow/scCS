@@ -26,15 +26,21 @@ def make_gene_scorer(*, sparse_x: bool = False):
     condition_root = np.repeat(["control"] * 4 + ["treated"] * 4, root_per_rep)
     condition = np.r_[condition_root, ["terminal"] * (2 * n_terminal)]
     pt_root = np.tile(np.linspace(0.05, 0.95, root_per_rep), n_replicates)
-    pt = np.r_[pt_root, np.linspace(0.7, 1.0, n_terminal), np.linspace(0.7, 1.0, n_terminal)]
+    pt = np.r_[
+        pt_root, np.linspace(0.7, 1.0, n_terminal), np.linspace(0.7, 1.0, n_terminal)
+    ]
 
     replicate_effect = np.repeat(np.linspace(0.05, 0.95, n_replicates), root_per_rep)
-    t = np.clip(0.75 * replicate_effect + 0.10 * pt_root + rng.normal(0, 0.015, n_root), 0, 1)
+    t = np.clip(
+        0.75 * replicate_effect + 0.10 * pt_root + rng.normal(0, 0.015, n_root), 0, 1
+    )
     gene_b = t + rng.normal(0, 0.015, n_root)
     gene_pt = pt_root + rng.normal(0, 0.015, n_root)
     gene_noise = rng.normal(0, 1, n_root)
     gene_constant = np.ones(n_root)
-    root_matrix = np.column_stack([gene_b, gene_pt, gene_noise, gene_constant, np.zeros(n_root)])
+    root_matrix = np.column_stack(
+        [gene_b, gene_pt, gene_noise, gene_constant, np.zeros(n_root)]
+    )
 
     a_terminal = np.column_stack(
         [
@@ -208,7 +214,9 @@ def test_replicate_association_filters_low_cell_units():
     scorer, result = make_gene_scorer()
     # Make one root replicate contain only one selected root cell by assigning
     # the remaining cells to a distinct low-cell unit.
-    root_ids = scorer.adata.obs.index[scorer.adata.obs["cluster"].astype(str).eq("root")]
+    root_ids = scorer.adata.obs.index[
+        scorer.adata.obs["cluster"].astype(str).eq("root")
+    ]
     first_rep = root_ids[:6]
     scorer.adata.obs.loc[first_rep[1:], "replicate"] = "low_cell_unit"
     association = scorer.get_commitment_associated_genes(
@@ -224,12 +232,23 @@ def test_replicate_association_filters_low_cell_units():
     )
     assert association.metadata["min_cells_per_replicate"] == 5
     assert association.metadata["n_excluded_replicate_units"] >= 1
-    assert any(row["n_cells"] < 5 for row in association.metadata["excluded_replicate_units"])
+    assert any(
+        row["n_cells"] < 5 for row in association.metadata["excluded_replicate_units"]
+    )
     assert all(row["n_cells"] >= 5 for row in association.metadata["replicate_units"])
 
 
 def test_future_fate_outcome_aliases_are_accepted_by_gene_association():
     scorer, result = make_gene_scorer()
+    labels = scorer.adata.obs[scorer.obs_key].astype(str).to_numpy()
+    matrix = sparse.eye(scorer.adata.n_obs, format="lil")
+    a = np.flatnonzero(labels == "A")[-1]
+    b = np.flatnonzero(labels == "B")[-1]
+    for i in np.flatnonzero(result.root_mask):
+        matrix.rows[i] = [int(a), int(b)]
+        matrix.data[i] = list(result.directional_affinity[i])
+    scorer.fit_future_fate(matrix.tocsr(), min_anchor_cells=1, verbose=False)
+    result = scorer.score(write_to_adata=False, verbose=False)
     future_named = get_commitment_associated_genes(
         scorer.adata,
         result,

@@ -30,8 +30,8 @@ import pandas as pd
 from scipy import sparse
 from scipy.stats import rankdata, t as student_t
 
+from .metrics import resolve_metric
 from .pipeline import FurcationScoreResult
-
 
 _FATE_OUTCOMES = {"directional_affinity", "commitment_contribution"}
 _SCALAR_OUTCOMES = {
@@ -119,7 +119,9 @@ class CommitmentGeneAssociationResult:
 
 def _safe_name(value: object) -> str:
     text = str(value).strip().replace(" ", "_").replace("/", "_")
-    return "".join(character for character in text if character.isalnum() or character in "_-.")
+    return "".join(
+        character for character in text if character.isalnum() or character in "_-."
+    )
 
 
 def _bh_adjust(pvalues: np.ndarray) -> np.ndarray:
@@ -162,7 +164,9 @@ def _resolve_population_mask(
         raise ValueError("population must be 'root', 'all', or a Boolean mask.")
     mask = np.asarray(population)
     if mask.dtype != bool or mask.ndim != 1 or len(mask) != len(result.cell_ids):
-        raise ValueError("Custom population mask must be Boolean and aligned to result.cell_ids.")
+        raise ValueError(
+            "Custom population mask must be Boolean and aligned to result.cell_ids."
+        )
     if not mask.any():
         raise ValueError("Custom population mask selects no cells.")
     return mask.copy()
@@ -173,15 +177,20 @@ def _resolve_outcomes(
     outcome: str,
     fate_names: Optional[Sequence[str]],
 ) -> Dict[str, np.ndarray]:
+    resolve_metric(str(outcome), getattr(result, "scoring_mode", "instantaneous"))
     name = _resolve_outcome_name(outcome)
     if name in _FATE_OUTCOMES:
         selected_fates = list(result.fate_names if fate_names is None else fate_names)
         missing = [fate for fate in selected_fates if fate not in result.fate_names]
         if missing:
-            raise ValueError(f"Unknown fate names: {missing}; available: {list(result.fate_names)}")
+            raise ValueError(
+                f"Unknown fate names: {missing}; available: {list(result.fate_names)}"
+            )
         values = getattr(result, name)
         return {
-            str(fate): np.asarray(values[:, result.fate_names.index(str(fate))], dtype=float)
+            str(fate): np.asarray(
+                values[:, result.fate_names.index(str(fate))], dtype=float
+            )
             for fate in selected_fates
         }
     return {name: np.asarray(getattr(result, name), dtype=float)}
@@ -198,11 +207,17 @@ def _resolve_matrix(adata, *, layer: Optional[str], use_raw: bool):
         return adata.X, np.asarray(adata.var_names).astype(str), "X"
     if layer not in adata.layers:
         raise KeyError(f"Layer {layer!r} is missing from adata.layers.")
-    return adata.layers[layer], np.asarray(adata.var_names).astype(str), f"layer:{layer}"
+    return (
+        adata.layers[layer],
+        np.asarray(adata.var_names).astype(str),
+        f"layer:{layer}",
+    )
 
 
 def _selected_adata_indices(adata, result: FurcationScoreResult) -> np.ndarray:
-    indexer = pd.Index(np.asarray(adata.obs_names).astype(str)).get_indexer(result.cell_ids)
+    indexer = pd.Index(np.asarray(adata.obs_names).astype(str)).get_indexer(
+        result.cell_ids
+    )
     if np.any(indexer < 0):
         missing = np.asarray(result.cell_ids)[indexer < 0][:5].tolist()
         raise ValueError(f"Result cell IDs are absent from AnnData, e.g. {missing}")
@@ -227,9 +242,13 @@ def _build_cell_covariates(
         if pd.api.types.is_numeric_dtype(series):
             values = series.to_numpy(dtype=float)
             if not np.all(np.isfinite(values)):
-                raise ValueError(f"Numeric covariate {key!r} contains non-finite values.")
+                raise ValueError(
+                    f"Numeric covariate {key!r} contains non-finite values."
+                )
             if np.nanstd(values) <= np.finfo(float).eps:
-                warnings.warn(f"Covariate {key!r} is constant and was omitted.", stacklevel=3)
+                warnings.warn(
+                    f"Covariate {key!r} is constant and was omitted.", stacklevel=3
+                )
                 continue
             ranked = _rank_numeric(values)
             ranked = (ranked - ranked.mean()) / ranked.std(ddof=0)
@@ -237,7 +256,9 @@ def _build_cell_covariates(
             names.append(key)
         else:
             categorical = series.astype(str)
-            dummies = pd.get_dummies(categorical, prefix=key, drop_first=True, dtype=float)
+            dummies = pd.get_dummies(
+                categorical, prefix=key, drop_first=True, dtype=float
+            )
             for dummy_name in dummies.columns:
                 columns.append(dummies[dummy_name].to_numpy(dtype=float))
                 names.append(str(dummy_name))
@@ -262,7 +283,9 @@ def _aggregate_replicates(
         raise ValueError("replicate_key contains missing values.")
     if condition_key is not None:
         if condition_key not in obs:
-            raise KeyError(f"condition_key {condition_key!r} is missing from adata.obs.")
+            raise KeyError(
+                f"condition_key {condition_key!r} is missing from adata.obs."
+            )
         condition = obs[condition_key].astype(str)
         unit = condition + "::" + replicate
     else:
@@ -287,17 +310,30 @@ def _aggregate_replicates(
     return group_index.astype(int), pd.DataFrame(metadata_rows)
 
 
-def _aggregate_vector(values: np.ndarray, groups: np.ndarray, n_groups: int) -> np.ndarray:
-    sums = np.bincount(groups, weights=np.asarray(values, dtype=float), minlength=n_groups)
+def _aggregate_vector(
+    values: np.ndarray,
+    groups: np.ndarray,
+    n_groups: int,
+    *,
+    ignore_nonfinite: bool = False,
+) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    if ignore_nonfinite:
+        valid = np.isfinite(values)
+        values, groups = values[valid], groups[valid]
+    sums = np.bincount(groups, weights=values, minlength=n_groups)
     counts = np.bincount(groups, minlength=n_groups)
-    return sums / counts
+    return np.divide(sums, counts, out=np.full(n_groups, np.nan), where=counts > 0)
 
 
 def _aggregate_matrix(values, groups: np.ndarray, n_groups: int) -> np.ndarray:
-    dense = values.toarray() if sparse.issparse(values) else np.asarray(values, dtype=float)
+    dense = (
+        values.toarray() if sparse.issparse(values) else np.asarray(values, dtype=float)
+    )
     output = np.empty((n_groups, dense.shape[1]), dtype=float)
     for group in range(n_groups):
-        output[group] = np.mean(dense[groups == group], axis=0)
+        selected = dense[groups == group]
+        output[group] = selected.mean(axis=0) if len(selected) else np.nan
     return output
 
 
@@ -327,7 +363,9 @@ def _partial_rank_association(
     pvalues = np.ones(features.shape[1], dtype=float)
     if degrees > 0:
         safe = valid & (np.abs(effects) < 1.0 - 1e-15)
-        statistic = effects[safe] * np.sqrt(degrees / np.maximum(1e-15, 1.0 - effects[safe] ** 2))
+        statistic = effects[safe] * np.sqrt(
+            degrees / np.maximum(1e-15, 1.0 - effects[safe] ** 2)
+        )
         pvalues[safe] = 2.0 * student_t.sf(np.abs(statistic), df=degrees)
         pvalues[valid & ~safe] = 0.0
     return effects, pvalues
@@ -452,14 +490,18 @@ def get_commitment_associated_genes(
         replicate_metadata = None
     else:
         if replicate_key is None:
-            raise ValueError("replicate_key is required for replicate-level association.")
+            raise ValueError(
+                "replicate_key is required for replicate-level association."
+            )
 
         # Filter low-cell replicate units before any expression or outcome
         # aggregation.  This prevents unstable one- or two-cell means from
         # being treated as equally reliable biological units.
         if condition_key is not None:
             if condition_key not in selected_obs:
-                raise KeyError(f"condition_key {condition_key!r} is missing from adata.obs.")
+                raise KeyError(
+                    f"condition_key {condition_key!r} is missing from adata.obs."
+                )
             unit_labels = (
                 selected_obs[condition_key].astype(str)
                 + "::"
@@ -470,7 +512,8 @@ def get_commitment_associated_genes(
         unit_counts = unit_labels.value_counts(sort=False)
         excluded = unit_counts[unit_counts < int(min_cells_per_replicate)]
         excluded_replicate_units = [
-            {"replicate_unit": str(name), "n_cells": int(count)} for name, count in excluded.items()
+            {"replicate_unit": str(name), "n_cells": int(count)}
+            for name, count in excluded.items()
         ]
         keep_cells = unit_labels.isin(
             unit_counts[unit_counts >= int(min_cells_per_replicate)].index
@@ -534,16 +577,23 @@ def get_commitment_associated_genes(
     tested_counts = np.zeros(len(genes), dtype=int)
     feature_means = np.full(len(genes), np.nan, dtype=float)
     feature_sds = np.full(len(genes), np.nan, dtype=float)
-    target_effects = {target: np.full(len(genes), np.nan, dtype=float) for target in outcomes}
-    target_pvalues = {target: np.full(len(genes), np.nan, dtype=float) for target in outcomes}
+    target_effects = {
+        target: np.full(len(genes), np.nan, dtype=float) for target in outcomes
+    }
+    target_pvalues = {
+        target: np.full(len(genes), np.nan, dtype=float) for target in outcomes
+    }
 
     if inference_unit == "cell_exploratory":
         outcome_values = population_outcomes
     else:
         outcome_values = {
-            target: _aggregate_vector(values, groups, unit_count)
+            target: _aggregate_vector(values, groups, unit_count, ignore_nonfinite=True)
             for target, values in population_outcomes.items()
         }
+        for target, values in population_outcomes.items():
+            counts = np.bincount(groups[np.isfinite(values)], minlength=unit_count)
+            outcome_values[target][counts < min_cells_per_replicate] = np.nan
 
     for start in range(0, len(genes), chunk_size):
         stop = min(start + chunk_size, len(genes))
@@ -566,13 +616,20 @@ def get_commitment_associated_genes(
         if not eligible.any():
             continue
 
-        if inference_unit == "replicate":
-            analysis_chunk = _aggregate_matrix(chunk[:, eligible], groups, unit_count)
-        else:
-            analysis_chunk = chunk[:, eligible]
-
         for target, target_values in outcome_values.items():
+            if inference_unit == "replicate":
+                defined_cells = np.isfinite(population_outcomes[target])
+                analysis_chunk = _aggregate_matrix(
+                    chunk[defined_cells][:, eligible], groups[defined_cells], unit_count
+                )
+            else:
+                analysis_chunk = chunk[:, eligible]
             valid_units = np.isfinite(target_values)
+            minimum_units = (
+                min_replicates if inference_unit == "replicate" else min_cells
+            )
+            if valid_units.sum() < minimum_units:
+                continue
             if valid_units.sum() <= np.linalg.matrix_rank(design[valid_units]) + 2:
                 continue
             effects, pvalues = _partial_rank_association(
@@ -598,7 +655,10 @@ def get_commitment_associated_genes(
                 "feature_mean": feature_means,
                 "feature_sd": feature_sds,
                 "n_detected_cells": tested_counts,
-                "n_units": unit_count,
+                "n_units": int(np.isfinite(outcome_values[target]).sum()),
+                "n_cells_with_defined_outcome": int(
+                    np.isfinite(population_outcomes[target]).sum()
+                ),
             }
         )
         table = table[np.isfinite(table["effect"])].copy()
@@ -606,9 +666,9 @@ def get_commitment_associated_genes(
             table["effect"].abs() >= float(effect_threshold)
         )
         table["absolute_effect"] = table["effect"].abs()
-        table = table.sort_values(["effect", "pvalue_adj"], ascending=[False, True]).reset_index(
-            drop=True
-        )
+        table = table.sort_values(
+            ["effect", "pvalue_adj"], ascending=[False, True]
+        ).reset_index(drop=True)
         table["rank"] = np.arange(1, len(table) + 1)
         tables[target] = table
 
@@ -622,9 +682,9 @@ def get_commitment_associated_genes(
             if shown.empty:
                 shown = table.head(n_top_genes)
             print(
-                shown[["rank", "gene", "effect", "pvalue_adj", "significant"]].to_string(
-                    index=False
-                )
+                shown[
+                    ["rank", "gene", "effect", "pvalue_adj", "significant"]
+                ].to_string(index=False)
             )
 
     metadata: Dict[str, Any] = {
@@ -643,6 +703,11 @@ def get_commitment_associated_genes(
         "n_cells_initial": initial_selected_cells,
         "n_cells": int(len(selected_rows)),
         "n_units": int(unit_count),
+        "n_defined_units_by_target": {
+            target: int(np.isfinite(values).sum())
+            for target, values in outcome_values.items()
+        },
+        "undefined_outcome_policy": "exclude undefined outcomes; aggregate matching cells",
         "min_cells_per_replicate": (
             int(min_cells_per_replicate) if inference_unit == "replicate" else None
         ),
@@ -733,7 +798,9 @@ def get_fate_markers(
             table["logfoldchange"].abs() >= logfc_threshold
         )
         table["analysis_type"] = "terminal_annotation_marker_vs_root"
-        table = table.sort_values(["logfoldchange", "pvalue_adj"], ascending=[False, True])
+        table = table.sort_values(
+            ["logfoldchange", "pvalue_adj"], ascending=[False, True]
+        )
         table = table.reset_index(drop=True)
         table["rank"] = np.arange(1, len(table) + 1)
         output[str(fate)] = table

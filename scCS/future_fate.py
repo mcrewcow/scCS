@@ -26,14 +26,16 @@ silently converted into an automatically inferred terminal fate.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Sequence
 import warnings
 
 import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import splu
+from scipy.stats import rankdata
 
+from ._alignment import cell_indices, observation_fingerprint, transition_fingerprint
 from ._version import VERSION
 from .affinity import CommitmentAffinityResult, normalized_entropy
 from .furcation import Furcation
@@ -65,7 +67,7 @@ def canonicalize_transition_matrix(transition_matrix) -> TransitionNormalization
     rows receive self-loops so every row represents a valid Markov state.
     """
     matrix = sparse.csr_matrix(transition_matrix, dtype=float).copy()
-    if matrix.shape[0] != matrix.shape[1]:
+    if matrix.shape[0] == 0 or matrix.shape[0] != matrix.shape[1]:
         raise ValueError("transition_matrix must be square.")
     if matrix.data.size and not np.all(np.isfinite(matrix.data)):
         raise ValueError("transition_matrix contains non-finite values.")
@@ -101,7 +103,9 @@ def canonicalize_transition_matrix(transition_matrix) -> TransitionNormalization
 
     # Remove residual sparse accumulation error one final time.
     row_sum = np.asarray(matrix.sum(axis=1)).ravel().astype(float)
-    correction = np.divide(1.0, row_sum, out=np.ones_like(row_sum), where=row_sum > _EPS)
+    correction = np.divide(
+        1.0, row_sum, out=np.ones_like(row_sum), where=row_sum > _EPS
+    )
     matrix = (sparse.diags(correction) @ matrix).tocsr()
     output_row_sum = np.asarray(matrix.sum(axis=1)).ravel().astype(float)
     output_error = float(np.max(np.abs(output_row_sum - 1.0)))
@@ -120,13 +124,10 @@ def canonicalize_transition_matrix(transition_matrix) -> TransitionNormalization
 
 
 def _stable_fractional_rank(values: np.ndarray) -> np.ndarray:
-    order = np.argsort(np.asarray(values, dtype=float), kind="mergesort")
-    ranks = np.empty(len(order), dtype=float)
-    if len(order) <= 1:
-        ranks[:] = 0.0
-    else:
-        ranks[order] = np.arange(len(order), dtype=float) / (len(order) - 1.0)
-    return ranks
+    values = np.asarray(values, dtype=float)
+    if len(values) <= 1 or np.ptp(values) == 0:
+        return np.zeros_like(values)
+    return (rankdata(values, method="average") - 1.0) / (len(values) - 1.0)
 
 
 def _scale_progression(values: Sequence[float], mode: str) -> np.ndarray:
@@ -169,7 +170,9 @@ def _selected_transition_blocks(
             conditioned.rows[index] = [int(index)]
             conditioned.data[index] = [1.0]
         conditioned = conditioned.tocsr()
-    if not np.allclose(np.asarray(conditioned.sum(axis=1)).ravel(), 1.0, atol=1e-12, rtol=0.0):
+    if not np.allclose(
+        np.asarray(conditioned.sum(axis=1)).ravel(), 1.0, atol=1e-12, rtol=0.0
+    ):
         raise RuntimeError("Could not condition selected-path transitions.")
     return retained, conditioned, retained_mass, outside_mass
 
@@ -201,8 +204,12 @@ def choose_endpoint_anchors(
     """Choose late anchors independently within each annotated terminal fate."""
     if not 0.0 < quantile < 1.0:
         raise ValueError("anchor_quantile must lie strictly between 0 and 1.")
-    if min_cells < 1:
-        raise ValueError("min_anchor_cells must be positive.")
+    if (
+        isinstance(min_cells, (bool, np.bool_))
+        or not isinstance(min_cells, (int, np.integer))
+        or min_cells < 1
+    ):
+        raise ValueError("min_anchor_cells must be a positive integer.")
     values = (
         embedding.selected_ordering_values
         if ordering_values is None
@@ -210,14 +217,20 @@ def choose_endpoint_anchors(
     )
     values = np.asarray(values, dtype=float)
     if values.shape != (embedding.n_selected,) or not np.all(np.isfinite(values)):
-        raise ValueError("anchor ordering must be finite and aligned to selected cells.")
+        raise ValueError(
+            "anchor ordering must be finite and aligned to selected cells."
+        )
 
-    anchors = np.zeros((embedding.n_selected, len(embedding.geometry.fate_names)), dtype=bool)
+    anchors = np.zeros(
+        (embedding.n_selected, len(embedding.geometry.fate_names)), dtype=bool
+    )
     terminal_names = np.asarray(embedding.terminal_names).astype(str)
     for fate_index, fate in enumerate(embedding.geometry.fate_names):
         candidates = np.flatnonzero(embedding.terminal_mask & (terminal_names == fate))
         if candidates.size == 0:
-            raise ValueError(f"No selected cells are assigned to terminal fate {fate!r}.")
+            raise ValueError(
+                f"No selected cells are assigned to terminal fate {fate!r}."
+            )
         threshold = float(np.quantile(values[candidates], quantile))
         chosen = candidates[values[candidates] >= threshold]
         target = min(int(min_cells), int(candidates.size))
@@ -232,14 +245,20 @@ def _coerce_anchor_mask(value, n_states: int, *, name: str) -> np.ndarray:
     array = np.asarray(value)
     if array.dtype == bool:
         if array.ndim != 1 or len(array) != n_states:
-            raise ValueError(f"Boolean anchors for {name!r} must have length {n_states}.")
+            raise ValueError(
+                f"Boolean anchors for {name!r} must have length {n_states}."
+            )
         mask = array.copy()
     else:
         indices = np.asarray(value, dtype=int)
         if indices.ndim != 1 or indices.size == 0:
-            raise ValueError(f"Anchor indices for {name!r} must be a non-empty 1D sequence.")
+            raise ValueError(
+                f"Anchor indices for {name!r} must be a non-empty 1D sequence."
+            )
         if np.any(indices < 0) or np.any(indices >= n_states):
-            raise IndexError(f"Anchor indices for {name!r} fall outside the transition matrix.")
+            raise IndexError(
+                f"Anchor indices for {name!r} fall outside the transition matrix."
+            )
         mask = np.zeros(n_states, dtype=bool)
         mask[indices] = True
     if not np.any(mask):
@@ -259,7 +278,9 @@ def build_outcome_anchors(
     selected_indices = np.asarray(selected_indices, dtype=int)
     selected_anchors = np.asarray(selected_anchors, dtype=bool)
     if selected_anchors.shape != (len(selected_indices), len(fate_names)):
-        raise ValueError("selected_anchors shape does not match selected cells and fates.")
+        raise ValueError(
+            "selected_anchors shape does not match selected cells and fates."
+        )
     anchors = np.zeros((n_states, len(fate_names)), dtype=bool)
     anchors[selected_indices] = selected_anchors
     names = [str(name) for name in fate_names]
@@ -270,7 +291,9 @@ def build_outcome_anchors(
         for raw_name, value in competing_outcomes.items():
             name = str(raw_name)
             if name in names:
-                raise ValueError(f"Competing outcome name {name!r} duplicates a supervised fate.")
+                raise ValueError(
+                    f"Competing outcome name {name!r} duplicates a supervised fate."
+                )
             mask = _coerce_anchor_mask(value, n_states, name=name)
             overlap = occupied & mask
             if np.any(overlap):
@@ -286,7 +309,9 @@ def build_outcome_anchors(
     return tuple(names), anchors
 
 
-def _make_absorbing(transition: sparse.csr_matrix, anchors: np.ndarray) -> sparse.csr_matrix:
+def _make_absorbing(
+    transition: sparse.csr_matrix, anchors: np.ndarray
+) -> sparse.csr_matrix:
     absorbing = np.asarray(anchors, dtype=bool).any(axis=1)
     output = transition.tolil(copy=True)
     for index in np.flatnonzero(absorbing):
@@ -333,29 +358,53 @@ def solve_discounted_outcomes(
     on larger graphs.  The iterative solver uses only sparse matrix products
     and therefore avoids dense state-by-state objects.
     """
-    if int(effective_horizon) <= 0:
+    if (
+        isinstance(effective_horizon, (bool, np.bool_))
+        or not isinstance(effective_horizon, (int, np.integer))
+        or effective_horizon <= 0
+    ):
         raise ValueError("effective_horizon must be a positive integer.")
     if tolerance <= 0 or not np.isfinite(tolerance):
         raise ValueError("tolerance must be positive and finite.")
-    if max_iter < 1:
-        raise ValueError("max_iter must be positive.")
+    if (
+        isinstance(max_iter, (bool, np.bool_))
+        or not isinstance(max_iter, (int, np.integer))
+        or max_iter < 1
+    ):
+        raise ValueError("max_iter must be a positive integer.")
+    if (
+        isinstance(direct_max_states, (bool, np.bool_))
+        or not isinstance(direct_max_states, (int, np.integer))
+        or direct_max_states < 0
+    ):
+        raise ValueError("direct_max_states must be a nonnegative integer.")
 
     transition = sparse.csr_matrix(transition_matrix, dtype=float)
     anchors = np.asarray(anchors, dtype=bool)
     if transition.shape[0] != transition.shape[1]:
         raise ValueError("transition_matrix must be square.")
     if anchors.ndim != 2 or anchors.shape[0] != transition.shape[0]:
-        raise ValueError("anchors must be state-by-outcome and match transition_matrix.")
+        raise ValueError(
+            "anchors must be state-by-outcome and match transition_matrix."
+        )
+    if anchors.shape[1] < 1 or len(set(map(str, outcome_names))) != len(outcome_names):
+        raise ValueError("At least one uniquely named outcome is required.")
     if anchors.shape[1] != len(outcome_names):
         raise ValueError("outcome_names and anchor columns do not match.")
     if np.any(anchors.sum(axis=1) > 1):
         raise ValueError("A state cannot anchor more than one outcome.")
     if not np.all(anchors.any(axis=0)):
         missing = [
-            str(name) for name, present in zip(outcome_names, anchors.any(axis=0)) if not present
+            str(name)
+            for name, present in zip(outcome_names, anchors.any(axis=0))
+            if not present
         ]
         raise ValueError(f"Outcomes without anchors: {missing}.")
 
+    if transition.shape[0] == 0 or not np.all(np.isfinite(transition.data)):
+        raise ValueError("transition_matrix must be non-empty and finite.")
+    if np.any(transition.data < 0):
+        raise ValueError("transition_matrix contains negative entries.")
     row_sum = np.asarray(transition.sum(axis=1)).ravel().astype(float)
     if not np.allclose(row_sum, 1.0, atol=1e-10, rtol=0.0):
         raise ValueError("transition_matrix rows must sum to one.")
@@ -369,7 +418,11 @@ def solve_discounted_outcomes(
         raise ValueError("solver must be 'auto', 'direct', or 'iterative'.")
     chosen = requested
     if chosen == "auto":
-        chosen = "direct" if len(transient_indices) <= int(direct_max_states) else "iterative"
+        chosen = (
+            "direct"
+            if len(transient_indices) <= int(direct_max_states)
+            else "iterative"
+        )
 
     values = anchors.astype(float)
     iterations = 0
@@ -378,7 +431,9 @@ def solve_discounted_outcomes(
 
     if transient_indices.size and chosen == "direct":
         q = absorbing_transition[transient_indices][:, transient_indices].tocsr()
-        rhs = gamma * np.asarray(absorbing_transition[transient_indices] @ anchors.astype(float))
+        rhs = gamma * np.asarray(
+            absorbing_transition[transient_indices] @ anchors.astype(float)
+        )
         system = sparse.eye(len(transient_indices), format="csc") - gamma * q.tocsc()
         solved = np.asarray(splu(system).solve(rhs), dtype=float)
         values[transient_indices] = np.clip(solved, 0.0, 1.0)
@@ -415,7 +470,9 @@ def solve_discounted_outcomes(
     unresolved = np.clip(1.0 - values.sum(axis=1), 0.0, 1.0)
     conservation = np.max(np.abs(values.sum(axis=1) + unresolved - 1.0))
     if conservation > 1e-9:
-        raise RuntimeError(f"Discounted probability conservation failed: {conservation:.3e}.")
+        raise RuntimeError(
+            f"Discounted probability conservation failed: {conservation:.3e}."
+        )
 
     return DiscountedOutcomeSolution(
         outcome_names=tuple(str(name) for name in outcome_names),
@@ -437,8 +494,7 @@ def _conditional_affinity(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     reach = np.asarray(selected_probability, dtype=float).sum(axis=1)
     defined = reach >= float(min_reach)
-    k = selected_probability.shape[1]
-    affinity = np.full_like(selected_probability, 1.0 / k)
+    affinity = np.full_like(selected_probability, np.nan)
     affinity[defined] = selected_probability[defined] / reach[defined, None]
     return reach, affinity, defined
 
@@ -500,6 +556,18 @@ class FutureFateScoreResult:
     scoring_mode: str = "future_fate"
     magnitude_scaler: Any = None
     magnitude_fit_population: str = "not_applicable"
+    committed_reach_threshold: float = 0.25
+    committed_specificity_threshold: float = 0.25
+    tolerance: float = 1e-10
+    max_iter: int = 20_000
+    direct_max_states: int = 50_000
+    progression_values: Optional[np.ndarray] = None
+    graph_fingerprint: str = ""
+
+    @property
+    def affinity_defined(self) -> np.ndarray:
+        """Cells with a conditional fate distribution above min_reach."""
+        return self.projection.velocity_defined.copy()
 
     @property
     def cell_ids(self) -> np.ndarray:
@@ -659,7 +727,9 @@ class FutureFateScoreResult:
             "future_fate mode has no branch-velocity vector. The star is display-only."
         )
 
-    def summarize(self, mask: Optional[np.ndarray] = None) -> PopulationCommitmentSummary:
+    def summarize(
+        self, mask: Optional[np.ndarray] = None
+    ) -> PopulationCommitmentSummary:
         if mask is None:
             mask = self.root_mask
         values = np.asarray(mask)
@@ -674,15 +744,24 @@ class FutureFateScoreResult:
         composition = self.root_population_summary.commitment_composition
         if self.root_population_summary.composition_defined:
             composition_text = ", ".join(
-                f"{name}={value:.3f}" for name, value in zip(self.fate_names, composition)
+                f"{name}={value:.3f}"
+                for name, value in zip(self.fate_names, composition)
             )
         else:
             composition_text = "undefined (zero selected-fate reach)"
         gamma = self.effective_horizon / (self.effective_horizon + 1)
         coverage = float(np.mean(self.projection.velocity_defined[root]))
         reach = float(np.mean(self.selected_reach[root]))
-        entropy = float(np.mean(self.directional_entropy[root]))
-        specificity = float(np.mean(self.directional_specificity[root]))
+        entropy = (
+            float(np.nanmean(self.directional_entropy[root]))
+            if np.any(self.affinity_defined[root])
+            else float("nan")
+        )
+        specificity = (
+            float(np.nanmean(self.directional_specificity[root]))
+            if np.any(self.affinity_defined[root])
+            else float("nan")
+        )
         supported = float(np.mean(self.specific_commitment[root]))
         unresolved = float(np.mean(self.unresolved_probability[root]))
         progression = float(np.mean(self.progression_velocity[root]))
@@ -709,11 +788,15 @@ class FutureFateScoreResult:
 
         return pd.DataFrame([dict(row) for row in self.anchor_diagnostics])
 
-    def write_to_adata(self, adata, *, metadata_key: str = "sccs_v08") -> None:
+    def write_to_adata(
+        self, adata, *, metadata_key: str = "sccs_v08", compact_metadata: bool = False
+    ) -> None:
         """Write full-length future-fate outputs and reproducibility metadata."""
-        self.embedding.write_to_adata(adata, metadata_key=metadata_key)
+        self.embedding.write_to_adata(
+            adata, metadata_key=metadata_key, compact_metadata=compact_metadata
+        )
         n_obs = adata.n_obs
-        selected = self.embedding.selected_indices
+        selected = cell_indices(adata, self.cell_ids)
 
         def full_vector(values, *, fill=np.nan, dtype=float):
             output = np.full(n_obs, fill, dtype=dtype)
@@ -725,8 +808,12 @@ class FutureFateScoreResult:
             output[selected] = values
             return output
 
-        adata.obsm["sccs_future_fate_probability"] = full_matrix(self.selected_probability, self.k)
-        adata.obsm["sccs_future_fate_affinity"] = full_matrix(self.future_fate_affinity, self.k)
+        adata.obsm["sccs_future_fate_probability"] = full_matrix(
+            self.selected_probability, self.k
+        )
+        adata.obsm["sccs_future_fate_affinity"] = full_matrix(
+            self.future_fate_affinity, self.k
+        )
         adata.obsm["sccs_future_fate_contribution"] = full_matrix(
             self.future_fate_contribution, self.k
         )
@@ -734,18 +821,31 @@ class FutureFateScoreResult:
             adata.obsm["sccs_competing_outcome_probability"] = full_matrix(
                 self.competing_probability, self.competing_probability.shape[1]
             )
+        adata.obs["sccs_affinity_defined"] = full_vector(
+            self.affinity_defined, fill=False, dtype=bool
+        )
         adata.obs["sccs_future_fate_reach"] = full_vector(self.selected_reach)
         adata.obs["sccs_competing_fate_reach"] = full_vector(self.competing_reach)
-        adata.obs["sccs_unresolved_probability"] = full_vector(self.unresolved_probability)
+        adata.obs["sccs_unresolved_probability"] = full_vector(
+            self.unresolved_probability
+        )
         adata.obs["sccs_future_fate_entropy"] = full_vector(self.future_fate_entropy)
-        adata.obs["sccs_future_fate_specificity"] = full_vector(self.future_fate_specificity)
+        adata.obs["sccs_future_fate_specificity"] = full_vector(
+            self.future_fate_specificity
+        )
         adata.obs["sccs_reach_supported_specificity"] = full_vector(
             self.reach_supported_specificity
         )
         adata.obs["sccs_signed_progression"] = full_vector(self.progression_velocity)
-        adata.obs["sccs_supported_progression_flux"] = full_vector(self.supported_progression_flux)
-        adata.obs["sccs_selected_path_coverage"] = full_vector(self.projection.transition_coverage)
-        adata.obs["sccs_future_fate_status"] = full_vector(self.status, fill="", dtype=object)
+        adata.obs["sccs_supported_progression_flux"] = full_vector(
+            self.supported_progression_flux
+        )
+        adata.obs["sccs_selected_path_coverage"] = full_vector(
+            self.projection.transition_coverage
+        )
+        adata.obs["sccs_future_fate_status"] = full_vector(
+            self.status, fill="", dtype=object
+        )
         adata.obs["sccs_future_dominant_fate"] = full_vector(
             self.dominant_fate, fill="", dtype=object
         )
@@ -755,6 +855,18 @@ class FutureFateScoreResult:
         metadata["scoring_mode"] = "future_fate"
         metadata["future_fate"] = {
             "effective_horizon": int(self.effective_horizon),
+            "gamma": self.effective_horizon / (self.effective_horizon + 1.0),
+            "committed_reach_threshold": self.committed_reach_threshold,
+            "committed_specificity_threshold": self.committed_specificity_threshold,
+            "tolerance": self.tolerance,
+            "max_iter": self.max_iter,
+            "direct_max_states": self.direct_max_states,
+            "undefined_affinity_policy": "NaN; conditional summaries use defined cells; RC=0",
+            "anchor_state_indices": {
+                name: np.flatnonzero(self.outcome_anchor_mask[:, j])
+                for j, name in enumerate(self.outcome_names)
+            },
+            "transition_fingerprint": self.graph_fingerprint,
             "solver": self.solver,
             "solver_iterations": int(self.solver_iterations),
             "solver_converged": bool(self.solver_converged),
@@ -766,15 +878,40 @@ class FutureFateScoreResult:
             "fate_names": list(self.fate_names),
             "outcome_names": list(self.outcome_names),
             "anchor_diagnostics": {
-                str(row["fate"]): {key: value for key, value in row.items() if key != "fate"}
+                str(row["fate"]): {
+                    key: value for key, value in row.items() if key != "fate"
+                }
                 for row in self.anchor_diagnostics
             },
             "transition_normalization": {
                 key: value
-                for key, value in asdict(self.transition_normalization).items()
+                for key, value in vars(self.transition_normalization).items()
                 if key != "matrix"
             },
         }
+        if not compact_metadata:
+            metadata["future_fate"]["progression_values"] = self.progression_values
+            metadata["future_fate"]["selected_cell_ids"] = self.cell_ids.astype(str)
+        source_ids = self.embedding.observation_ids
+        if source_ids is not None:
+            metadata["future_fate"]["source_observation_fingerprint"] = (
+                observation_fingerprint(source_ids)
+            )
+            if not compact_metadata:
+                metadata["future_fate"]["source_observation_ids"] = np.asarray(
+                    source_ids
+                ).astype(str)
+            metadata["future_fate"]["anchor_cell_ids"] = {
+                name: np.asarray(source_ids)[self.outcome_anchor_mask[:, j]].astype(str)
+                for j, name in enumerate(self.outcome_names)
+            }
+        if compact_metadata:
+            for key in ("source_observation_ids", "selected_cell_ids", "progression_values"):
+                metadata["future_fate"].pop(key, None)
+            metadata["future_fate"]["identity_reference"] = (
+                "Parent selected_indices map to target obs_names; "
+                "source fingerprint and anchor IDs retained."
+            )
         adata.uns[metadata_key] = metadata
 
 
@@ -795,7 +932,9 @@ def _anchor_diagnostics(
         local_anchor = selected_anchors[:, fate_index]
         full_anchor = selected_indices[local_anchor]
         same_full = np.zeros_like(selected_full)
-        same_full[selected_indices[embedding.terminal_mask & (terminal_names == fate)]] = True
+        same_full[
+            selected_indices[embedding.terminal_mask & (terminal_names == fate)]
+        ] = True
         other_full = selected_full & ~root_full & ~same_full
         block = full_transition[full_anchor]
         rows.append(
@@ -847,12 +986,27 @@ def score_future_fate(
     population.  Optional competing outcomes must be supplied explicitly as
     full-length Boolean masks or full-state index sequences.
     """
-    if not 0 <= min_reach <= 1:
-        raise ValueError("min_reach must lie in [0, 1].")
+    if not 0 < min_reach <= 1:
+        raise ValueError("min_reach must lie in (0, 1].")
+    for name, threshold in [
+        ("committed_reach_threshold", committed_reach_threshold),
+        ("committed_specificity_threshold", committed_specificity_threshold),
+    ]:
+        if not np.isfinite(threshold) or not 0 <= threshold <= 1:
+            raise ValueError(f"{name} must lie in [0, 1].")
     normalization = canonicalize_transition_matrix(transition_matrix)
     full_transition = normalization.matrix
+    if (
+        embedding.observation_ids is not None
+        and len(embedding.observation_ids) != full_transition.shape[0]
+    ):
+        raise ValueError(
+            "transition_matrix must match the full AnnData observation axis."
+        )
     if full_transition.shape[0] <= int(np.max(embedding.selected_indices)):
-        raise ValueError("transition_matrix does not cover all selected furcation cells.")
+        raise ValueError(
+            "transition_matrix does not cover all selected furcation cells."
+        )
 
     selected_indices = np.asarray(embedding.selected_indices, dtype=int)
     retained, conditioned, retained_mass, outside_mass = _selected_transition_blocks(
@@ -873,7 +1027,9 @@ def score_future_fate(
             )
     if not np.all(np.isfinite(selected_progression_values)):
         raise ValueError("progression_values contains non-finite selected-cell values.")
-    progression_coordinate = _scale_progression(selected_progression_values, progression_scale)
+    progression_coordinate = _scale_progression(
+        selected_progression_values, progression_scale
+    )
     progression = expected_ordering_change(conditioned, progression_coordinate)
     supported_progression = np.asarray(retained @ progression_coordinate).ravel() - (
         retained_mass * progression_coordinate
@@ -907,7 +1063,9 @@ def score_future_fate(
     selected_probability_full = solution.probability[:, :k]
     competing_probability_full = solution.probability[:, k:]
     selected_probability = selected_probability_full[selected_indices]
-    selected_reach, affinity, defined = _conditional_affinity(selected_probability, min_reach)
+    selected_reach, affinity, defined = _conditional_affinity(
+        selected_probability, min_reach
+    )
     competing_reach_full = (
         competing_probability_full.sum(axis=1)
         if competing_probability_full.shape[1]
@@ -915,15 +1073,16 @@ def score_future_fate(
     )
     competing_reach = competing_reach_full[selected_indices]
 
-    entropy = normalized_entropy(affinity)
+    entropy = np.full(len(affinity), np.nan)
+    entropy[defined] = normalized_entropy(affinity[defined])
     specificity = np.clip(1.0 - entropy, 0.0, 1.0)
     uniform = np.full_like(affinity, 1.0 / k)
-    commitment_affinity = (1.0 - selected_reach[:, None]) * uniform + (
-        selected_reach[:, None] * affinity
-    )
+    commitment_affinity = (
+        1.0 - selected_reach[:, None]
+    ) * uniform + selected_probability
     commitment_entropy = normalized_entropy(commitment_affinity)
-    contribution = selected_reach[:, None] * affinity
-    specific_commitment = selected_reach * specificity
+    contribution = selected_probability.copy()
+    specific_commitment = np.where(defined, selected_reach * specificity, 0.0)
     commitment = CommitmentAffinityResult(
         directional_affinity=affinity,
         velocity_magnitude=selected_reach.copy(),
@@ -938,7 +1097,9 @@ def score_future_fate(
     )
 
     projection = ProjectionResult(
-        velocity=np.full((embedding.n_selected, embedding.dimension), np.nan, dtype=float),
+        velocity=np.full(
+            (embedding.n_selected, embedding.dimension), np.nan, dtype=float
+        ),
         retained_transition_mass=retained_mass,
         external_transition_mass=outside_mass,
         transition_coverage=retained_mass,
@@ -954,8 +1115,10 @@ def score_future_fate(
         committed_reach_threshold=committed_reach_threshold,
         committed_specificity_threshold=committed_specificity_threshold,
     )
-    dominant_index = np.argmax(affinity, axis=1)
-    dominant_fate = np.asarray(embedding.geometry.fate_names, dtype=object)[dominant_index]
+    dominant_index = np.argmax(np.nan_to_num(affinity, nan=-1.0), axis=1)
+    dominant_fate = np.asarray(embedding.geometry.fate_names, dtype=object)[
+        dominant_index
+    ]
     dominant_fate[status != "future_fate_committed"] = ""
     root_summary = summarize_commitment(contribution[embedding.root_mask])
     diagnostics = _anchor_diagnostics(
@@ -995,4 +1158,11 @@ def score_future_fate(
         root_population_summary=root_summary,
         transition_normalization=normalization,
         anchor_diagnostics=diagnostics,
+        committed_reach_threshold=float(committed_reach_threshold),
+        committed_specificity_threshold=float(committed_specificity_threshold),
+        tolerance=float(tolerance),
+        max_iter=int(max_iter),
+        direct_max_states=int(direct_max_states),
+        progression_values=np.asarray(selected_progression_values, dtype=float).copy(),
+        graph_fingerprint=transition_fingerprint(full_transition),
     )

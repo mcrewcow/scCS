@@ -10,8 +10,10 @@ project = "scCS"
 author = "Emil Kriukov"
 copyright = "2026, Emil Kriukov"
 
-version = "0.8"
-release = "0.8.0"
+from scCS import __version__  # noqa: E402
+
+version = __version__
+release = __version__
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -35,12 +37,7 @@ except ImportError:
     html_theme = "alabaster"
 else:
     html_theme = "furo"
-html_title = "scCS v.0.8"
-html_short_title = "scCS v.0.8"
+html_title = "scCS documentation"
 
 nbsphinx_execute = "never"
 nbsphinx_allow_errors = False
-
-# Project branding
-html_static_path = ["_static"]
-html_logo = "_static/logo.png"

@@ -57,9 +57,18 @@ subsampled in the no-chunk benchmark.
 High-memory exact 200-million-cell run
 --------------------------------------
 
-The standard tutorial measures every complete problem that fits safely on the
-current host. To require the exact 200-million-cell full graph solve, run with
+The standard profile requests sizes through one million cells, subject to the
+current host memory check. Larger targets are explicitly NOT_REQUESTED. The
+extended profile requests the full size ladder. To require the exact 200-million-cell full graph solve, run with
 ``SCCS_SCALABILITY_PROFILE=exact_200m``. The notebook raises an error if the
 complete allocation cannot be made. No chunked or out-of-core substitute is
 used. A degree-30 no-chunk ladder is reported separately from the degree-4
 200-million-cell performance graph.
+
+Allocation boundaries
+----------------------
+
+These numerical workloads exclude AnnData subset copies, cell-ID metadata,
+full-length score export and kinetic fitting. They do not establish an end-to-end
+biological analysis at 200M cells. The source ZIP and repository include the
+executed benchmark; PyPI distributions omit notebook media.

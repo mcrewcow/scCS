@@ -23,11 +23,14 @@ def graph_solve_bytes(n_cells: int, degree: int, n_outcomes: int) -> int:
     anchors = n_cells * n_outcomes
     return int(csr + probabilities + vectors + anchors)
 
+
 def available_memory() -> int:
     return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
 
+
 def current_rss_gb() -> float:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024 / 1e9
+
 
 def build_transition(n_cells: int, degree: int, n_outcomes: int):
     if degree < n_outcomes + 1:
@@ -46,12 +49,13 @@ def build_transition(n_cells: int, degree: int, n_outcomes: int):
     data = np.full(n_cells * degree, 1.0 / degree, dtype=np.float64)
     return sparse.csr_matrix((data, indices, indptr), shape=(n_cells, n_cells))
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cells", type=int, default=200_000_000)
     parser.add_argument("--degree", type=int, default=4)
     parser.add_argument("--outcomes", type=int, default=3)
-    parser.add_argument("--effective-horizon", type=float, default=64.0)
+    parser.add_argument("--effective-horizon", type=int, default=64)
     parser.add_argument("--output", type=Path, default=Path("dffp_200m_result.json"))
     parser.add_argument("--memory-headroom", type=float, default=1.20)
     args = parser.parse_args()
@@ -80,7 +84,9 @@ def main():
         max_iter=500,
     )
     elapsed = time.perf_counter() - started
-    checksum = float(solution.probability.mean() + solution.unresolved_probability.mean())
+    checksum = float(
+        solution.probability.mean() + solution.unresolved_probability.mean()
+    )
     result = {
         "scCS_version": scCS.__version__,
         "cells": args.cells,
@@ -99,6 +105,7 @@ def main():
     }
     args.output.write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))
+
 
 if __name__ == "__main__":
     main()

@@ -33,7 +33,9 @@ def test_root_and_terminal_coordinates_have_expected_radius():
         ["A", "B", "C"],
         arm_scale=10.0,
     )
-    np.testing.assert_allclose(np.linalg.norm(terminal, axis=1), [10.0, 10.0, 10.0], atol=1e-12)
+    np.testing.assert_allclose(
+        np.linalg.norm(terminal, axis=1), [10.0, 10.0, 10.0], atol=1e-12
+    )
 
 
 def test_fate_reordering_is_equivariant_after_label_alignment():
@@ -43,13 +45,23 @@ def test_fate_reordering_is_equivariant_after_label_alignment():
     geom_b = SimplexStarGeometry(names_b)
 
     coefficients = {"Alpha": 0.8, "Beta": -0.1, "Delta": 0.3, "Epsilon": 0.2}
-    velocity_a = sum(coefficients[name] * geom_a.direction_for(name) for name in names_a)
-    velocity_b = sum(coefficients[name] * geom_b.direction_for(name) for name in names_b)
+    velocity_a = sum(
+        coefficients[name] * geom_a.direction_for(name) for name in names_a
+    )
+    velocity_b = sum(
+        coefficients[name] * geom_b.direction_for(name) for name in names_b
+    )
 
-    similarities_a = {name: float(velocity_a @ geom_a.direction_for(name)) for name in names_a}
-    similarities_b = {name: float(velocity_b @ geom_b.direction_for(name)) for name in names_a}
+    similarities_a = {
+        name: float(velocity_a @ geom_a.direction_for(name)) for name in names_a
+    }
+    similarities_b = {
+        name: float(velocity_b @ geom_b.direction_for(name)) for name in names_a
+    }
     for name in names_a:
-        np.testing.assert_allclose(similarities_a[name], similarities_b[name], atol=1e-12, rtol=0.0)
+        np.testing.assert_allclose(
+            similarities_a[name], similarities_b[name], atol=1e-12, rtol=0.0
+        )
 
 
 def test_progression_and_branch_velocity_decompose_exactly():

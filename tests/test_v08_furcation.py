@@ -41,7 +41,9 @@ def test_grouped_labels_are_only_population_grouping():
         },
         min_cells=1,
     )
-    labels = np.array(["Pre-endocrine_1", "Pre-endocrine_2", "Alpha_1", "Alpha_2", "Beta"])
+    labels = np.array(
+        ["Pre-endocrine_1", "Pre-endocrine_2", "Alpha_1", "Alpha_2", "Beta"]
+    )
     report = furcation.validate_labels(labels)
     assert report.root_count == 2
     assert report.terminal_counts == {"Alpha": 2, "Beta": 1}

@@ -1,0 +1,13 @@
+criterion,value,status
+Pancreas dynamical: root CFA stable h64 vs h128,0.000589,PASS
+Pancreas dynamical: root CFA stable q0.85 vs q...,0.002770,PASS
+Pancreas dynamical: root CFA coverage,1.000000,PASS
+Schwann deterministic: root CFA stable h64 vs ...,0.001622,PASS
+Schwann deterministic: root CFA stable q0.85 v...,0.013149,PASS
+Schwann deterministic: root CFA coverage,1.000000,PASS
+Schwann dynamical: root CFA stable h64 vs h128,0.000612,PASS
+Schwann dynamical: root CFA stable q0.85 vs q0.95,0.010306,PASS
+Schwann dynamical: root CFA coverage,1.000000,PASS
+Schwann deterministic/dynamical CFA agreement,0.015043,PASS
+Schwann deterministic/dynamical SOF agreement,0.951161,PASS
+Schwann deterministic/dynamical FFS agreement,0.742901,INFO

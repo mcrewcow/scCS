@@ -101,7 +101,9 @@ def test_external_only_transition_is_low_coverage_not_no_outgoing():
             dtype=float,
         )
     )
-    furcation = Furcation(obs_key="clusters", root="Root", terminals=["A", "B"], min_cells=1)
+    furcation = Furcation(
+        obs_key="clusters", root="Root", terminals=["A", "B"], min_cells=1
+    )
     result = score_furcation(
         adata,
         furcation,

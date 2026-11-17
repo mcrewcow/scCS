@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import combinations
 from math import comb
+import warnings
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -24,6 +25,7 @@ class PermutationTestResult:
     n_permutations: int
     n_group_a: int
     n_group_b: int
+    minimum_attainable_pvalue: float = float("nan")
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,7 @@ def two_group_permutation_test(
     n_permutations: int = 9999,
     max_exact: int = 100_000,
     random_state: int = 0,
+    alpha: float = 0.05,
 ) -> PermutationTestResult:
     """Two-sided replicate-label permutation test for a mean difference.
 
@@ -78,6 +81,10 @@ def two_group_permutation_test(
     greater than ``max_exact``.  Otherwise a Monte Carlo p-value with the
     ``(b + 1) / (B + 1)`` correction is returned.
     """
+    if not 0 < alpha < 1:
+        raise ValueError("alpha must lie in (0, 1).")
+    if str(group_a) == str(group_b):
+        raise ValueError("group_a and group_b must differ.")
     x = _finite_1d(values, name="values")
     g = np.asarray(labels).astype(str)
     if g.ndim != 1 or len(g) != len(x):
@@ -93,7 +100,9 @@ def two_group_permutation_test(
     n_a = int(np.sum(g == str(group_a)))
     n_b = int(np.sum(g == str(group_b)))
     if n_a < 2 or n_b < 2:
-        raise ValueError("Replicate-level permutation requires at least two replicates per group.")
+        raise ValueError(
+            "Replicate-level permutation requires at least two replicates per group."
+        )
 
     observed = two_group_mean_difference(x, g, group_a, group_b)
     absolute_observed = abs(observed)
@@ -102,6 +111,17 @@ def two_group_permutation_test(
     tolerance = 1e-15
 
     if n_allocations <= max_exact:
+        # Equal-sized groups have a complementary allocation with the same
+        # absolute mean difference. Ties can only increase this lower bound.
+        minimum_p = (2 if n_a == n_b else 1) / n_allocations
+        if minimum_p > alpha:
+            warnings.warn(
+                f"Exact two-sided replicate test ({n_a} vs {n_b}) has minimum "
+                f"attainable p-value >= {minimum_p:.6g}, above alpha={alpha:g}; "
+                "multiplicity adjustment can only increase it.",
+                UserWarning,
+                stacklevel=2,
+            )
         exceed = 0
         total = 0
         indices = np.arange(n_total)
@@ -120,8 +140,16 @@ def two_group_permutation_test(
             n_permutations=total,
             n_group_a=n_a,
             n_group_b=n_b,
+            minimum_attainable_pvalue=minimum_p,
         )
 
+    minimum_p = 1 / (n_permutations + 1)
+    if minimum_p > alpha:
+        warnings.warn(
+            f"Monte Carlo p-value resolution {minimum_p:.6g} exceeds alpha={alpha:g}.",
+            UserWarning,
+            stacklevel=2,
+        )
     rng = np.random.default_rng(random_state)
     exceed = 0
     base = np.r_[np.zeros(n_a, dtype=int), np.ones(n_b, dtype=int)]
@@ -138,6 +166,7 @@ def two_group_permutation_test(
         n_permutations=int(n_permutations),
         n_group_a=n_a,
         n_group_b=n_b,
+        minimum_attainable_pvalue=minimum_p,
     )
 
 
@@ -152,7 +181,9 @@ def one_way_f_statistic(values: Sequence[float], labels: Sequence[object]) -> fl
         raise ValueError("Each condition must contain at least two replicates.")
 
     grand = float(x.mean())
-    ss_between = sum(len(group) * (float(group.mean()) - grand) ** 2 for group in groups)
+    ss_between = sum(
+        len(group) * (float(group.mean()) - grand) ** 2 for group in groups
+    )
     ss_within = sum(float(np.sum((group - group.mean()) ** 2)) for group in groups)
     df_between = len(groups) - 1
     df_within = len(x) - len(groups)
@@ -179,7 +210,9 @@ def one_way_permutation_test(
         raise ValueError("n_permutations must be positive.")
     unique, counts = np.unique(g, return_counts=True)
     if len(unique) < 3:
-        raise ValueError("One-way multi-condition testing requires at least three groups.")
+        raise ValueError(
+            "One-way multi-condition testing requires at least three groups."
+        )
     if np.any(counts < 2):
         raise ValueError("Each condition must contain at least two replicates.")
 

@@ -101,11 +101,21 @@ class RootProgressionDirectionDiagnostics:
             "max_abs_expected_progress_vs_scientific_error": float(
                 self.max_abs_progression_identity_error
             ),
-            "forward_expected_progress_fraction": float(self.forward_expected_progress_fraction),
-            "forward_scientific_progression_fraction": float(self.forward_scientific_fraction),
-            "forward_transition_display_fraction": float(self.forward_transition_display_fraction),
-            "forward_scvelo_centered_display_fraction": float(self.forward_scvelo_display_fraction),
-            "mean_expected_progress_change": float(np.nanmean(self.expected_progress_change)),
+            "forward_expected_progress_fraction": float(
+                self.forward_expected_progress_fraction
+            ),
+            "forward_scientific_progression_fraction": float(
+                self.forward_scientific_fraction
+            ),
+            "forward_transition_display_fraction": float(
+                self.forward_transition_display_fraction
+            ),
+            "forward_scvelo_centered_display_fraction": float(
+                self.forward_scvelo_display_fraction
+            ),
+            "mean_expected_progress_change": float(
+                np.nanmean(self.expected_progress_change)
+            ),
             "mean_scientific_progression_velocity": float(
                 np.nanmean(self.scientific_progression_velocity)
             ),
@@ -175,7 +185,9 @@ def project_transition_velocity(
     """
     coordinates = np.asarray(selected_coordinates, dtype=float)
     if coordinates.ndim != 2 or coordinates.shape[0] == 0:
-        raise ValueError("selected_coordinates must be a non-empty two-dimensional array.")
+        raise ValueError(
+            "selected_coordinates must be a non-empty two-dimensional array."
+        )
     if not np.all(np.isfinite(coordinates)):
         raise ValueError("selected_coordinates contains non-finite values.")
     if not 0.0 <= min_coverage <= 1.0:
@@ -187,11 +199,17 @@ def project_transition_velocity(
     if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
         raise ValueError("transition_matrix must be square.")
     if sparse.issparse(matrix):
-        if matrix.data.size and (not np.all(np.isfinite(matrix.data)) or np.any(matrix.data < 0)):
-            raise ValueError("transition_matrix entries must be finite and non-negative.")
+        if matrix.data.size and (
+            not np.all(np.isfinite(matrix.data)) or np.any(matrix.data < 0)
+        ):
+            raise ValueError(
+                "transition_matrix entries must be finite and non-negative."
+            )
     else:
         if not np.all(np.isfinite(matrix)) or np.any(matrix < 0):
-            raise ValueError("transition_matrix entries must be finite and non-negative.")
+            raise ValueError(
+                "transition_matrix entries must be finite and non-negative."
+            )
 
     n_selected = coordinates.shape[0]
     if selected_indices is None:

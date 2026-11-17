@@ -86,9 +86,8 @@ def test_pair_scorer_uses_condition_specific_cells_and_replicates():
     assert results["treated"].n_cells == 20
     assert results["control"].n_replicates == 5
     assert results["treated"].n_replicates == 5
-    assert (
-        results["treated"].population_summary.mean_commitment_contribution[1]
-        > (results["control"].population_summary.mean_commitment_contribution[1])
+    assert results["treated"].population_summary.mean_commitment_contribution[1] > (
+        results["control"].population_summary.mean_commitment_contribution[1]
     )
 
 
@@ -216,7 +215,11 @@ def test_multi_posthoc_can_filter_by_significant_omnibus():
     scorer = make_multi_scorer()
     scorer.score_all_conditions(verbose=False)
     omnibus = scorer.compare_omnibus(
-        metric="mean_commitment", fate="B", n_permutations=199, random_state=8, verbose=False
+        metric="mean_commitment",
+        fate="B",
+        n_permutations=199,
+        random_state=8,
+        verbose=False,
     )
     posthoc = scorer.compare_posthoc(
         metric="mean_commitment",
@@ -245,9 +248,19 @@ def test_metric_alias_is_canonicalized_in_outputs():
     assert "mean_commitment::B" not in table.columns
 
 
-
 def test_future_fate_alias_adds_public_metric_metadata():
     scorer = make_pair_scorer()
+    from scipy import sparse
+
+    labels = scorer.adata.obs["cluster"].astype(str).to_numpy()
+    matrix = sparse.eye(scorer.adata.n_obs, format="lil")
+    a = np.flatnonzero(labels == "A")[-1]
+    b = np.flatnonzero(labels == "B")[-1]
+    for i in np.flatnonzero(labels == "root"):
+        weight = 0.2 if scorer.adata.obs.iloc[i]["condition"] == "control" else 0.8
+        matrix.rows[i] = [int(a), int(b)]
+        matrix.data[i] = [1 - weight, weight]
+    scorer.fit(matrix.tocsr(), scoring_mode="future_fate", verbose=False)
     scorer.score_all_conditions(verbose=False)
     comparison = scorer.compare_conditions(
         metric="future_fate_affinity",
@@ -259,6 +272,7 @@ def test_future_fate_alias_adds_public_metric_metadata():
     assert row["metric"] == "directional_affinity"
     assert row["metric_public"] == "future_fate_affinity"
     assert row["metric_label"] == "Conditional Fate Affinity (CFA) toward B"
+
 
 def test_score_all_conditions_rejects_partial_designs():
     adata = make_condition_adata(
@@ -378,7 +392,9 @@ def test_condition_visualizations_smoke():
         scorer.plot_replicate_outcomes(metric="mean_commitment_contribution", fate="B"),
         scorer.plot_effects(stats),
         scorer.plot_commitment_heatmap(),
-        scorer.plot_pseudotime_trends(pseudotime_key="pt", metric="specific_commitment", n_bins=4),
+        scorer.plot_pseudotime_trends(
+            pseudotime_key="pt", metric="specific_commitment", n_bins=4
+        ),
         scorer.plot_transition_coverage(),
         scorer.plot_status_composition(),
         scorer.plot_affinity_distributions(metric="mean_commitment", fate="B"),

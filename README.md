@@ -65,6 +65,9 @@ future-fate mode.
 
 ## Installation
 
+For this **0.8.1rc2 source candidate**, use [INSTALL_CONDA.md](INSTALL_CONDA.md) and the supplied constraints. Published-package commands below refer to whichever version is on PyPI. Reviewed executed tutorials are included in the full source ZIP/repository and published in the documentation; the PyPI sdist/wheel omit notebook media.
+
+
 ```bash
 pip install scCS-py
 ```
@@ -140,6 +143,12 @@ Condition scorers also accept explicit aliases such as
 `metric="future_fate_affinity"`, `metric="future_fate_reach"`, and
 `metric="reach_supported_specificity"`.
 
+### Missingness and interpretation
+
+CFA, future-fate entropy and FFS are undefined (`NaN`) below the configured supervised-fate reach threshold. Condition summaries exclude these cells from conditional metrics and report the valid counts/fractions; RC is zero for these cells. Always compare conditional preference together with DFR, UFP and defined-affinity coverage. Missing CFA is not uniform preference. The horizon is a graph-step discount, not calibrated physical time; reach and specificity alone do not establish irreversible commitment.
+
+Instantaneous mode remains the API default for compatibility. The revised biological tutorials explicitly select `scoring_mode="future_fate"`. In a two-fate instantaneous star, collinear displacements have identical cosine affinities regardless of magnitude; this limits its use for quantitative fate mixtures.
+
 ## Optional competing outcomes
 
 Competing outcomes are never guessed silently. Supply them as full-data Boolean
@@ -201,7 +210,7 @@ Unusual branch dynamics are not automatically errors.
 - **Retrograde branch:** strong fate affinity with negative signed progression.
 - **Loop or turn:** fate identity may remain stable while progression changes sign.
 - **Mixed branch:** low specificity or low probability margin may be biologically real.
-- **Non-sink-like endpoint:** anchor diagnostics warn that late annotated cells
+- **Non-sink-like endpoint:** inspect anchor transition diagnostics when late annotated cells
   transition toward root, another fate, or outside the selected path.
 
 Anchor diagnostics are warnings for interpretation, not requirements that all
@@ -308,9 +317,7 @@ Documentation: https://sccs-py.readthedocs.io/
 
 ## Citation
 
-A manuscript describing the redesigned method is in preparation. Until then, cite
-the software repository and record the exact package version, scoring mode, ordering,
-effective horizon, anchor quantile, and velocity model used in the analysis.
+For the preliminary biological ideas, cite Kriukov et al., *Single-cell transcriptomics reveals reversible microglia/macrophage activation after human retinal neuron transplantation into mouse retina*, iScience (2026), DOI [10.1016/j.isci.2026.117232](https://doi.org/10.1016/j.isci.2026.117232). The redesigned methods are described separately in the [methods preprint](https://doi.org/10.64898/2026.07.27.741070). See `CITATION.cff`. Record the exact software version, scoring mode, ordering, effective horizon, anchors and velocity model in analyses.
 
 
 ## Exact 200-million-cell no-chunk run
@@ -320,3 +327,11 @@ high-memory host, set `SCCS_SCALABILITY_PROFILE=exact_200m` before running the
 scalability notebook, or use
 `benchmarks/v08/run_dffp_200m_no_chunk.py`. The runner fails when the entire
 problem cannot be allocated; it never substitutes a chunked calculation.
+
+### Changes when upgrading from development builds
+
+Undefined CFA, conditional entropy and specificity remain `NaN`. Use explicit
+defined-cell masks and report coverage and DFR; do not replace unknown affinity
+with zero or uniform preference. Whole-replicate undefined outcomes now raise
+during inference. Explicit `undefined_replicates="drop"` exclusions are audited.
+See [rc2 release notes](docs/release_notes.rst) for migration and statistical details.

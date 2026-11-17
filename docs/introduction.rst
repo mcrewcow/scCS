@@ -135,4 +135,4 @@ Where to go next
 
 Read :doc:`mathematical_framework` for the equations, :doc:`quickstart` for the
 minimal API workflow, :doc:`method_selection` for the alternatives evaluated,
-and the :doc:`tutorials_single`, :doc:`tutorials_pair`, and :doc:`tutorials_multi` guides for complete pancreas and Schwann analyses.
+and :doc:`tutorials` for complete pancreas and Schwann analyses.

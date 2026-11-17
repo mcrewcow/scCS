@@ -1,0 +1,6 @@
+Processing /tmp/rc2-dist-final/sccs_py-0.8.1rc2-py3-none-any.whl
+Installing collected packages: sccs-py
+Successfully installed sccs-py-0.8.1rc2
+
+[notice] A new release of pip is available: 25.0.1 -> 26.3
+[notice] To update, run: python -m pip install --upgrade pip

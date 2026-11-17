@@ -1,0 +1,98 @@
+[
+  {
+    "notebook": "01_pancreas_single_scorer.ipynb",
+    "code_cells": 21,
+    "png_figures": 13,
+    "execution_seconds": 46.736,
+    "sha256": "7816973dc4e3199fe7740d12285712bb5e19e6f7ead775905bb3ffd66b4e6be0",
+    "docs_identical": true
+  },
+  {
+    "notebook": "02_schwann_single_scorer.ipynb",
+    "code_cells": 20,
+    "png_figures": 13,
+    "execution_seconds": 54.626,
+    "sha256": "be4a58fa8fef7e660b10f3d40bdf426f8ad51a61c35c714360609df67df77ce8",
+    "docs_identical": true
+  },
+  {
+    "notebook": "03_pancreas_pair_scorer.ipynb",
+    "code_cells": 22,
+    "png_figures": 18,
+    "execution_seconds": 41.02,
+    "sha256": "16492a12bb89bf8b830eb8400ef1ccc88ddb8a41c6a02f84244ee89d3fa4df59",
+    "docs_identical": true
+  },
+  {
+    "notebook": "04_schwann_pair_scorer.ipynb",
+    "code_cells": 22,
+    "png_figures": 18,
+    "execution_seconds": 38.324,
+    "sha256": "09c036c7b77f7e7ee549901ca93f4352b47828e660c8399d89d01522c2a92276",
+    "docs_identical": true
+  },
+  {
+    "notebook": "05_pancreas_multi_scorer.ipynb",
+    "code_cells": 23,
+    "png_figures": 19,
+    "execution_seconds": 34.806,
+    "sha256": "02c0aa6818daac6f0e3336f02b6db62b61b5168216effdd947c95e67e1a220d1",
+    "docs_identical": true
+  },
+  {
+    "notebook": "06_schwann_multi_scorer.ipynb",
+    "code_cells": 23,
+    "png_figures": 19,
+    "execution_seconds": 34.605,
+    "sha256": "13545d748079836b70cb867d0b7d754c3683fd65d1f5298923e01962dbd52c41",
+    "docs_identical": true
+  },
+  {
+    "notebook": "07_method_selection.ipynb",
+    "code_cells": 8,
+    "png_figures": 7,
+    "execution_seconds": 2.043,
+    "sha256": "eb2979457912319a3151cc04f94521ff822f810c7a6dce100307b6d9ffe0ccac",
+    "docs_identical": true
+  },
+  {
+    "notebook": "08_complex_branches.ipynb",
+    "code_cells": 9,
+    "png_figures": 6,
+    "execution_seconds": 2.179,
+    "sha256": "6b611a582f6e71b05b21fc0414d19d8aca810e6ce21c856d968899a4ee3f181b",
+    "docs_identical": true
+  },
+  {
+    "notebook": "09_package_decision_reproduction.ipynb",
+    "code_cells": 8,
+    "png_figures": 2,
+    "execution_seconds": 49.042,
+    "sha256": "b6237eef2a430eafd0789d63aa03bf85aa2d8e7c032e27555764a4cb20970730",
+    "docs_identical": true
+  },
+  {
+    "notebook": "10_pancreas_downstream_analysis.ipynb",
+    "code_cells": 19,
+    "png_figures": 8,
+    "execution_seconds": 29.192,
+    "sha256": "faf19d1969ad0985e4bcf5b48acec079f0fe00a0826ad3072fce37190ac6a4a9",
+    "docs_identical": true
+  },
+  {
+    "notebook": "11_schwann_downstream_analysis.ipynb",
+    "code_cells": 19,
+    "png_figures": 8,
+    "execution_seconds": 23.49,
+    "sha256": "bc5b3d580b5fbd3a681c40b0e156306cb68aa4fca8bfebb6ddf04c18e081fe66",
+    "docs_identical": true
+  },
+  {
+    "notebook": "12_scalability_no_chunking.ipynb",
+    "code_cells": 10,
+    "png_figures": 1,
+    "execution_seconds": 12.517,
+    "sha256": "63e8da31fcbbf7826d7694ed57e15fec394cca96c62c989e466610e2386148fe",
+    "docs_identical": true
+  }
+]

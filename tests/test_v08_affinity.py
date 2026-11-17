@@ -104,7 +104,9 @@ def test_two_fate_directional_entropy_has_no_continuous_angular_degree_of_freedo
     vectors = np.vstack([0.1 * axis, axis, 10.0 * axis, -0.2 * axis, -3.0 * axis])
     affinity = cosine_softmax_affinity(vectors, geometry.terminal_directions)
     entropy = normalized_entropy(affinity)
-    np.testing.assert_allclose(entropy, aligned_directional_entropy(2, 0.90), atol=1e-12)
+    np.testing.assert_allclose(
+        entropy, aligned_directional_entropy(2, 0.90), atol=1e-12
+    )
 
 
 def test_three_fate_equal_nearest_angles_have_equal_entropy_up_to_axis_permutation():

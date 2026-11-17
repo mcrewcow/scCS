@@ -26,11 +26,15 @@ def get_scvelo_transition_matrix(
     try:
         import scvelo as scv
     except ImportError as exc:  # pragma: no cover - environment dependent
-        raise ImportError("scvelo is required to build a transition matrix from velocity.") from exc
+        raise ImportError(
+            "scvelo is required to build a transition matrix from velocity."
+        ) from exc
 
     key = f"{vkey}_graph"
     if key not in adata.uns and key not in getattr(adata, "obsp", {}):
-        raise KeyError(f"Missing {key!r}; run scv.tl.velocity_graph(adata, vkey={vkey!r}) first.")
+        raise KeyError(
+            f"Missing {key!r}; run scv.tl.velocity_graph(adata, vkey={vkey!r}) first."
+        )
 
     # scVelo 0.3.x checks adata.uns even when the graph is held in obsp.
     temporary_graph = False

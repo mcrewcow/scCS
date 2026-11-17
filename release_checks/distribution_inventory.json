@@ -1,0 +1,16 @@
+[
+  {
+    "artifact": "sccs_py-0.8.1rc2-py3-none-any.whl",
+    "bytes": 143491,
+    "members": 32,
+    "sha256": "966526b7a935c68b338dbd359643af5cad1b97b54cc71037413e990a9a1e073f",
+    "unwanted_entries": []
+  },
+  {
+    "artifact": "sccs_py-0.8.1rc2.tar.gz",
+    "bytes": 181895,
+    "members": 76,
+    "sha256": "ab6f76b4e84001eee8c3d84fce3a6d842b0b424fbc0a18687b6fab01160ea054",
+    "unwanted_entries": []
+  }
+]

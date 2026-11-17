@@ -10,11 +10,10 @@ import pandas as pd
 from .condition import (
     ConditionCommitmentResult,
     ConditionScorer,
-    _canonical_metric,
-    _metric_label,
 )
 from .inference import holm_adjust, two_group_permutation_test
 from .mixed_models import fit_mixedlm_fail_closed
+from ._replicates import prepare_replicates, adjust_inference, replicate_plot_values
 
 
 class PairScorer(ConditionScorer):
@@ -44,6 +43,9 @@ class PairScorer(ConditionScorer):
         resample_cells_within_replicate: bool = True,
         random_state: int = 0,
         adjust_pvalues: bool = True,
+        undefined_replicates: str = "raise",
+        alpha: float = 0.05,
+        undefined_bootstrap: str = "raise",
         verbose: bool = True,
     ) -> pd.DataFrame:
         """Compare replicate-level commitment outcomes between two conditions.
@@ -51,10 +53,13 @@ class PairScorer(ConditionScorer):
         The reported effect is ``mean(condition_b) - mean(condition_a)``.
         Exact label permutation is used whenever the number of allocations is
         small enough; otherwise a corrected Monte Carlo p-value is used.
+        Non-finite replicate outcomes raise by default. Explicitly setting
+        ``undefined_replicates="drop"`` reports excluded IDs and sample sizes.
+        ``alpha`` controls the attainable-p-value diagnostic.
         """
         chosen = self._resolve_results(results)
         metric_public = str(metric)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         condition_a = self.conditions[0] if condition_a is None else str(condition_a)
         condition_b = self.conditions[1] if condition_b is None else str(condition_b)
         if condition_a == condition_b:
@@ -71,10 +76,12 @@ class PairScorer(ConditionScorer):
         rows = []
         specs = self._outcome_specs(metric, fate=fate, fate_pair=fate_pair)
         for offset, (fate_name, pair, column) in enumerate(specs):
-            subset = table.loc[
-                table["condition"].isin([condition_a, condition_b]),
-                ["condition", column],
-            ].dropna()
+            subset, audit = prepare_replicates(
+                table,
+                column,
+                [condition_a, condition_b],
+                undefined_replicates=undefined_replicates,
+            )
             test = two_group_permutation_test(
                 subset[column].to_numpy(dtype=float),
                 subset["condition"].to_numpy(str),
@@ -83,14 +90,17 @@ class PairScorer(ConditionScorer):
                 n_permutations=n_permutations,
                 max_exact=max_exact,
                 random_state=random_state + offset,
+                alpha=alpha,
             )
             values_a = subset.loc[subset["condition"] == condition_a, column]
             values_b = subset.loc[subset["condition"] == condition_b, column]
             rows.append(
                 {
+                    **audit,
+                    "minimum_attainable_pvalue": test.minimum_attainable_pvalue,
                     "metric": metric,
                     "metric_public": metric_public,
-                    "metric_label": _metric_label(metric_public, fate=fate_name),
+                    "metric_label": self._metric_label(metric_public, fate=fate_name),
                     "fate": fate_name,
                     "fate_a": None if pair is None else pair[0],
                     "fate_b": None if pair is None else pair[1],
@@ -108,10 +118,8 @@ class PairScorer(ConditionScorer):
             )
 
         output = pd.DataFrame(rows)
-        output["pvalue_adj"] = (
-            holm_adjust(output["pvalue"].to_numpy())
-            if adjust_pvalues and len(output) > 1
-            else output["pvalue"].to_numpy()
+        output = adjust_inference(
+            output, table, specs, metric, self.branches, adjust=adjust_pvalues
         )
 
         if n_bootstrap > 0:
@@ -126,6 +134,8 @@ class PairScorer(ConditionScorer):
                 resample_cells_within_replicate=resample_cells_within_replicate,
                 random_state=random_state + 100_000,
                 results=chosen,
+                undefined_replicates=undefined_replicates,
+                undefined_bootstrap=undefined_bootstrap,
             )
             merge_keys = [
                 "metric",
@@ -146,6 +156,8 @@ class PairScorer(ConditionScorer):
                         "confidence_level",
                         "n_bootstrap",
                         "resample_cells_within_replicate",
+                        "n_bootstrap_undefined",
+                        "bootstrap_status",
                     ]
                 ],
                 on=merge_keys,
@@ -219,6 +231,7 @@ class PairScorer(ConditionScorer):
         condition_a: Optional[str] = None,
         condition_b: Optional[str] = None,
         on_invalid: str = "return",
+        undefined_replicates: str = "raise",
     ) -> pd.DataFrame:
         """Fit optional cell-level mixed models with replicate random intercepts.
 
@@ -237,7 +250,7 @@ class PairScorer(ConditionScorer):
             ) from exc
 
         chosen = self._resolve_results(results)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if self.replicate_obs_key is None:
             raise ValueError("fit_mixed_model requires replicate_obs_key.")
         condition_a = self.conditions[0] if condition_a is None else str(condition_a)
@@ -245,7 +258,13 @@ class PairScorer(ConditionScorer):
         specs = self._outcome_specs(metric, fate=fate)
         rows = []
 
-        for fate_name, _, _ in specs:
+        for fate_name, _, column in specs:
+            eligible, eligibility_audit = prepare_replicates(
+                self.replicate_table(chosen),
+                column,
+                [condition_a, condition_b],
+                undefined_replicates=undefined_replicates,
+            )
             values = []
             groups = []
             indicators = []
@@ -278,17 +297,29 @@ class PairScorer(ConditionScorer):
                         "fit_mixed_model does not support this metric. Use a scalar "
                         "cell-level outcome or one fate-specific affinity/contribution."
                     )
-                finite = np.isfinite(cell_values)
+                included_ids = eligible.loc[
+                    eligible.condition == condition, "replicate_id"
+                ]
+                finite = np.isfinite(cell_values) & np.isin(
+                    result.replicate_ids, included_ids
+                )
                 values.extend(cell_values[finite].tolist())
                 # Replicate labels may be reused across independent conditions.
                 # Prefixing prevents accidental pairing of unrelated samples.
                 groups.extend(
-                    [f"{condition}::{replicate}" for replicate in result.replicate_ids[finite]]
+                    [
+                        f"{condition}::{replicate}"
+                        for replicate in result.replicate_ids[finite]
+                    ]
                 )
-                indicators.extend([1.0 if condition == condition_b else 0.0] * int(finite.sum()))
+                indicators.extend(
+                    [1.0 if condition == condition_b else 0.0] * int(finite.sum())
+                )
 
             endog = np.asarray(values, dtype=float)
-            exog = np.column_stack([np.ones(len(endog)), np.asarray(indicators, dtype=float)])
+            exog = np.column_stack(
+                [np.ones(len(endog)), np.asarray(indicators, dtype=float)]
+            )
             model = sm.MixedLM(endog, exog, groups=np.asarray(groups, dtype=str))
             audit = fit_mixedlm_fail_closed(
                 model,
@@ -297,6 +328,7 @@ class PairScorer(ConditionScorer):
             )
 
             common = {
+                **eligibility_audit,
                 "metric": metric,
                 "fate": fate_name,
                 "condition_a": condition_a,
@@ -313,7 +345,9 @@ class PairScorer(ConditionScorer):
                     audit.fixed_effect_covariance_condition_number
                 ),
                 "random_effect_variance_min": audit.random_effect_variance_min,
-                "converged": bool(audit.fit is not None and getattr(audit.fit, "converged", False)),
+                "converged": bool(
+                    audit.fit is not None and getattr(audit.fit, "converged", False)
+                ),
             }
             if not audit.valid:
                 rows.append(
@@ -392,7 +426,7 @@ class PairScorer(ConditionScorer):
         ``plot_type`` may be ``"box"``, ``"violin"``, or ``"strip"``.
         """
         chosen = self._resolve_results(results)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         plot_type = str(plot_type).lower()
         if plot_type not in {"box", "violin", "strip"}:
             raise ValueError("plot_type must be 'box', 'violin', or 'strip'.")
@@ -414,10 +448,12 @@ class PairScorer(ConditionScorer):
             axes = np.asarray([ax], dtype=object)
 
         for axis, (fate_name, pair, column) in zip(axes, specs):
-            distributions = [
-                table.loc[table["condition"] == condition, column].dropna().to_numpy(float)
+            plot_data = [
+                replicate_plot_values(table, column, condition)
                 for condition in self.conditions
             ]
+            distributions = [values for values, _ in plot_data]
+            tick_labels = [label for _, label in plot_data]
             positions = np.arange(1, len(self.conditions) + 1)
             if plot_type == "box":
                 axis.boxplot(distributions, positions=positions, widths=0.55)
@@ -431,17 +467,21 @@ class PairScorer(ConditionScorer):
                 )
             else:
                 for position, values in zip(positions, distributions):
-                    offsets = np.linspace(-0.10, 0.10, len(values)) if len(values) > 1 else [0.0]
+                    offsets = (
+                        np.linspace(-0.10, 0.10, len(values))
+                        if len(values) > 1
+                        else [0.0]
+                    )
                     axis.scatter(position + np.asarray(offsets), values, alpha=0.85)
             axis.set_xticks(positions)
-            axis.set_xticklabels(self.conditions, rotation=25, ha="right")
-            axis.set_ylabel(_metric_label(metric, fate=fate_name))
+            axis.set_xticklabels(tick_labels, rotation=25, ha="right")
+            axis.set_ylabel(self._metric_label(metric, fate=fate_name))
             if fate_name is not None:
                 axis.set_title(str(fate_name))
             elif pair is not None:
                 axis.set_title(f"{pair[0]} / {pair[1]}")
             else:
-                axis.set_title(_metric_label(metric))
+                axis.set_title(self._metric_label(metric))
         figure.suptitle(title or "Biological-replicate scCS distributions", y=1.02)
         return figure
 
@@ -536,7 +576,8 @@ class PairScorer(ConditionScorer):
         missing = sorted(required - set(statistics.columns))
         if missing:
             raise ValueError(
-                "plot_effects requires confidence intervals; missing columns: " + ", ".join(missing)
+                "plot_effects requires confidence intervals; missing columns: "
+                + ", ".join(missing)
             )
         if len(statistics) == 0:
             raise ValueError("statistics is empty.")
@@ -548,7 +589,9 @@ class PairScorer(ConditionScorer):
             fate_a = getattr(row, "fate_a", None)
             fate_b = getattr(row, "fate_b", None)
             labels.append(
-                str(fate) if fate is not None and not pd.isna(fate) else f"{fate_a} / {fate_b}"
+                str(fate)
+                if fate is not None and not pd.isna(fate)
+                else f"{fate_a} / {fate_b}"
             )
 
         import matplotlib.pyplot as plt
@@ -577,16 +620,24 @@ class PairScorer(ConditionScorer):
             else "mean_commitment_contribution"
         )
         condition_a = (
-            str(frame["condition_a"].iloc[0]) if "condition_a" in frame.columns else "condition A"
+            str(frame["condition_a"].iloc[0])
+            if "condition_a" in frame.columns
+            else "condition A"
         )
         condition_b = (
-            str(frame["condition_b"].iloc[0]) if "condition_b" in frame.columns else "condition B"
+            str(frame["condition_b"].iloc[0])
+            if "condition_b" in frame.columns
+            else "condition B"
         )
-        ax.set_xlabel(f"{_metric_label(metric_name)} effect: {condition_b} minus {condition_a}")
+        ax.set_xlabel(
+            f"{self._metric_label(metric_name)} effect: {condition_b} minus {condition_a}"
+        )
         ax.set_title("scCS replicate-level effects")
 
         pvalue_column = (
-            "pvalue_adj" if use_adjusted_pvalue and "pvalue_adj" in frame.columns else "pvalue"
+            "pvalue_adj"
+            if use_adjusted_pvalue and "pvalue_adj" in frame.columns
+            else "pvalue"
         )
         if pvalue_column in frame.columns:
             pvalues = frame[pvalue_column].to_numpy(dtype=float)
@@ -620,7 +671,9 @@ class PairScorer(ConditionScorer):
         required = {value_column, "fate"}
         missing = sorted(required - set(frame.columns))
         if missing:
-            raise ValueError("plot_delta_CS_heatmap is missing columns: " + ", ".join(missing))
+            raise ValueError(
+                "plot_delta_CS_heatmap is missing columns: " + ", ".join(missing)
+            )
         frame = frame.loc[frame["fate"].notna()].copy()
         if frame.empty:
             raise ValueError("statistics contains no fate-specific rows.")
@@ -638,12 +691,18 @@ class PairScorer(ConditionScorer):
         limit = float(np.nanmax(np.abs(values))) if np.any(np.isfinite(values)) else 1.0
         if limit <= 0:
             limit = 1.0
-        image = ax.imshow(values, aspect="auto", vmin=-limit, vmax=limit, cmap="coolwarm")
+        image = ax.imshow(
+            values, aspect="auto", vmin=-limit, vmax=limit, cmap="coolwarm"
+        )
         ax.set_xticks(np.arange(len(ordered_fates)))
         ax.set_xticklabels(ordered_fates, rotation=30, ha="right")
         ax.set_yticks([0])
-        condition_a = str(frame["condition_a"].iloc[0]) if "condition_a" in frame else "A"
-        condition_b = str(frame["condition_b"].iloc[0]) if "condition_b" in frame else "B"
+        condition_a = (
+            str(frame["condition_a"].iloc[0]) if "condition_a" in frame else "A"
+        )
+        condition_b = (
+            str(frame["condition_b"].iloc[0]) if "condition_b" in frame else "B"
+        )
         ax.set_yticklabels([f"{condition_b} − {condition_a}"])
         ax.set_title(title or "Fate-specific change in mean commitment contribution")
         ax.figure.colorbar(image, ax=ax, label="delta_CS")

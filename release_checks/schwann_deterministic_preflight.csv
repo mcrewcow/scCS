@@ -1,0 +1,13 @@
+level,code,message,value
+info,furcation_valid,Root and terminal annotations are valid.,1976.0
+info,root_cells,Root population contains 675 cells.,675.0
+info,terminal_Gut,Terminal 'Gut' contains 245 cells.,245.0
+info,terminal_Gut neuron,Terminal 'Gut neuron' contains 294 cells.,294.0
+info,terminal_ChC,Terminal 'ChC' contains 762 cells.,762.0
+info,ordering_valid,Ordering metric is finite and non-constant among selected furcation cells.,1.0
+info,ordering_resolution,Root ordering has 337 unique values across 675 cells.,0.49925925925925924
+info,velocity_available,Velocity information is available.,
+info,graph_dead_end_nonanchors,0 selected non-anchor cells have no positive off-diagonal transition.,0.0
+info,root_unreachable_selected_anchors,0 root cells have no graph path to selected anchors without crossing another outcome anchor. This is distinct from low discounted reach and can reflect graph/model limitations.,0.0
+warning,transition_coverage,"Root transition coverage median=0.987, q05=0.415.",0.4151589311484438
+info,undefined_affinity,Undefined root conditional-affinity fraction=0.000.,0.0

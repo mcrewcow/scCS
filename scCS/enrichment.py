@@ -28,7 +28,9 @@ class CommitmentEnrichmentResult:
     tables: Mapping[str, pd.DataFrame]
     metadata: Mapping[str, Any]
 
-    def top(self, target: str, n: int = 20, *, significant_only: bool = True) -> pd.DataFrame:
+    def top(
+        self, target: str, n: int = 20, *, significant_only: bool = True
+    ) -> pd.DataFrame:
         if target not in self.tables:
             raise KeyError(f"Unknown target {target!r}; available: {list(self.tables)}")
         table = self.tables[target]
@@ -36,7 +38,9 @@ class CommitmentEnrichmentResult:
             table = table[table["significant"]]
         return table.head(int(n)).copy()
 
-    def export(self, output_dir: Union[str, Path], prefix: str = "sccs_enrichment") -> list[str]:
+    def export(
+        self, output_dir: Union[str, Path], prefix: str = "sccs_enrichment"
+    ) -> list[str]:
         import json
 
         output = Path(output_dir)
@@ -55,7 +59,9 @@ class CommitmentEnrichmentResult:
 
 def _safe_name(value: object) -> str:
     text = str(value).strip().replace(" ", "_").replace("/", "_")
-    return "".join(character for character in text if character.isalnum() or character in "_-.")
+    return "".join(
+        character for character in text if character.isalnum() or character in "_-."
+    )
 
 
 def _bh_adjust(pvalues: np.ndarray) -> np.ndarray:
@@ -115,7 +121,10 @@ def _normalise_gene_sets(gene_sets: GeneSetInput):
     if isinstance(gene_sets, (str, Path)):
         path = Path(gene_sets)
         if path.exists():
-            return load_gmt(path), {"source_type": "local_gmt", "source": str(path.resolve())}
+            return load_gmt(path), {
+                "source_type": "local_gmt",
+                "source": str(path.resolve()),
+            }
         return None, {"source_type": "remote_enrichr", "libraries": [str(gene_sets)]}
     libraries = [str(value) for value in gene_sets]
     if not libraries:
@@ -162,7 +171,9 @@ def _query_genes(
         else:
             p_column = _pvalue_column(selected)
             if p_column is None:
-                raise ValueError("significant_only=True but no significance column is available.")
+                raise ValueError(
+                    "significant_only=True but no significance column is available."
+                )
             selected = selected[selected[p_column] < fdr_threshold]
     if direction == "positive":
         selected = selected[selected[effect_column] >= effect_threshold]
@@ -206,7 +217,9 @@ def _local_ora(
         c = len(set_genes - query_set)
         d = len(universe - query_set - set_genes)
         odds_ratio, pvalue = fisher_exact([[a, b], [c, d]], alternative="greater")
-        expected = (len(query_set) * len(set_genes) / len(universe)) if universe else np.nan
+        expected = (
+            (len(query_set) * len(set_genes) / len(universe)) if universe else np.nan
+        )
         rows.append(
             {
                 "term": str(term),
@@ -241,9 +254,9 @@ def _local_ora(
         )
     table["pvalue_adj"] = _bh_adjust(table["pvalue"].to_numpy(dtype=float))
     table["significant"] = table["pvalue_adj"] < fdr_threshold
-    return table.sort_values(["pvalue_adj", "odds_ratio"], ascending=[True, False]).reset_index(
-        drop=True
-    )
+    return table.sort_values(
+        ["pvalue_adj", "odds_ratio"], ascending=[True, False]
+    ).reset_index(drop=True)
 
 
 def _remote_enrichr(
@@ -284,7 +297,9 @@ def _remote_enrichr(
         "Combined Score": "combined_score",
         "Genes": "genes",
     }
-    result = result.rename(columns={key: value for key, value in rename.items() if key in result})
+    result = result.rename(
+        columns={key: value for key, value in rename.items() if key in result}
+    )
     if "overlap_text" in result:
         split = result["overlap_text"].astype(str).str.split("/", expand=True)
         result["overlap"] = pd.to_numeric(split[0], errors="coerce")
@@ -424,13 +439,22 @@ def plot_enrichment_dotplot(
     if ax is None:
         _, ax = plt.subplots(figsize=(8.0, max(3.0, 0.34 * max(1, len(table)) + 1.5)))
     if table.empty:
-        ax.text(0.5, 0.5, "No enriched terms", ha="center", va="center", transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.5,
+            "No enriched terms",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
         ax.set_axis_off()
         return ax.figure
     table = table.iloc[::-1]
     x = -np.log10(table["pvalue_adj"].clip(lower=1e-300))
     size = 40.0 + 260.0 * table["gene_ratio"].fillna(0.0).to_numpy(dtype=float)
-    scatter = ax.scatter(x, np.arange(len(table)), s=size, c=table["odds_ratio"], linewidths=0.4)
+    scatter = ax.scatter(
+        x, np.arange(len(table)), s=size, c=table["odds_ratio"], linewidths=0.4
+    )
     ax.set_yticks(np.arange(len(table)))
     ax.set_yticklabels(table["term"].astype(str))
     ax.set_xlabel("−log10 adjusted p-value")

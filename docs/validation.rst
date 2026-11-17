@@ -1,14 +1,13 @@
 Validation evidence
 ===================
 
-The final package-backed validation used dynamical pancreas velocity and
+The historical dev34 package-backed validation used dynamical pancreas velocity and
 independent deterministic and dynamical velocity fits on the RegVelo Schwann
 dataset.
 
-The release gate passed
------------------------
+Historical benchmark evidence
+-----------------------------
 
-The preserved-graph package reproduction reported ``FINAL: READY_TO_FREEZE``.
 Across pancreas and both Schwann velocity models, root CFA was stable between
 effective horizons 64 and 128 and between anchor quantiles 0.85 and 0.95. The
 deterministic and dynamical Schwann models showed low mean CFA divergence and
@@ -45,3 +44,13 @@ The no-chunk benchmark measured the complete cellwise DFFP metric transform at
 cells on the available host. The 200-million-cell full graph solve was marked
 ``SKIPPED_INSUFFICIENT_MEMORY`` rather than replaced by chunking. The separate
 high-memory runner is required for a direct 200-million-cell full-solve claim.
+
+Current release validation
+---------------------------
+
+The historical results above are separate from the current rc2 execution record.
+The source archive's ``RELEASE_VALIDATION.md`` records tests, notebook executions,
+documentation/package builds and validation limits. Tutorials include reviewed
+executed outputs. Synthetic condition perturbations remain software examples,
+not biological treatment experiments. See :doc:`release_notes` for behavior
+changes and :doc:`condition_inference` for replicate eligibility rules.
