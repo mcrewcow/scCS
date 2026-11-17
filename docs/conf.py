@@ -37,7 +37,12 @@ except ImportError:
     html_theme = "alabaster"
 else:
     html_theme = "furo"
-html_title = "scCS documentation"
+    html_theme_options = {"sidebar_hide_name": True}
+html_title = f"scCS {release} documentation"
+html_logo = "_static/logo.png"
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
+templates_path = ["_templates"]
 
 nbsphinx_execute = "never"
 nbsphinx_allow_errors = False
