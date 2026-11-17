@@ -206,7 +206,12 @@ def test_existing_cache_handles_missing_optional_distribution(tmp_path, monkeypa
         tutorial_cache.load_tutorial_cache("pancreas", cache_dir=tmp_path).shape
         == a.shape
     )
-    monkeypatch.setattr(tutorial_cache, "version", original)
+    def installed_igraph(name):
+        if name == "igraph":
+            return "test-installed-igraph"
+        return original(name)
+
+    monkeypatch.setattr(tutorial_cache, "version", installed_igraph)
     assert tutorial_cache.load_tutorial_cache("pancreas", cache_dir=tmp_path) is None
 
 

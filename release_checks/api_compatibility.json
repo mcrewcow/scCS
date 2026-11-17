@@ -1,8 +1,0 @@
-{
-  "removed_public_definitions": [],
-  "removed_parameters": [],
-  "added_public_definitions": [
-    "scCS/metrics.py:star_color_metric",
-    "scCS/single.py:SingleScorer.sensitivity_analysis"
-  ]
-}

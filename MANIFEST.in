@@ -1,6 +1,5 @@
 include LICENSE README.md pyproject.toml CITATION.cff
-include INSTALL_CONDA.md RELEASE_NOTES_0.8.1rc2.md RELEASE_VALIDATION.md UPLOAD_GITHUB.md
-include constraints-tutorials.txt environment-tutorials.yml TUTORIAL_SUITE_GUIDE.md
+include constraints-tutorials.txt environment-tutorials.yml
 recursive-include tests *.py
 recursive-include benchmarks *.py *.slurm
 recursive-include scCS py.typed

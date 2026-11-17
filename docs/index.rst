@@ -50,6 +50,5 @@ and one of the complete pancreas or Schwann tutorials.
 
    api
    api_advanced
-   release_notes
    changelog
    references

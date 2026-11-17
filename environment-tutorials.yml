@@ -1,4 +1,4 @@
-name: sccs-081rc2
+name: sccs-100
 channels:
   - conda-forge
 dependencies:

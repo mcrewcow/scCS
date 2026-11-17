@@ -65,7 +65,10 @@ future-fate mode.
 
 ## Installation
 
-For this **0.8.1rc2 source candidate**, use [INSTALL_CONDA.md](INSTALL_CONDA.md) and the supplied constraints. Published-package commands below refer to whichever version is on PyPI. Reviewed executed tutorials are included in the full source ZIP/repository and published in the documentation; the PyPI sdist/wheel omit notebook media.
+For a reproducible tutorial environment from a source checkout, follow the
+[installation guide](https://sccs-py.readthedocs.io/en/latest/installation.html).
+The repository includes executed notebooks; their figures are also available
+in the [tutorial documentation](https://sccs-py.readthedocs.io/en/latest/tutorials.html).
 
 
 ```bash
@@ -287,8 +290,8 @@ It also contains:
 - a single-process, in-memory, no-chunking scalability notebook whose exact
   target ladder extends to 200 million cells.
 
-Each primary notebook loads its public dataset directly and recomputes RNA velocity;
-no hidden tutorial cache is assumed. The Schwann tutorials use dynamical velocity as
+Each primary notebook loads its public dataset directly and prepares RNA velocity.
+Completed preprocessing fits are cached for reuse across notebooks. The Schwann tutorials use dynamical velocity as
 their primary model. Every guide covers ordering validation, preflight diagnostics,
 discounted future-fate scoring, anchor and horizon sensitivity, population and
 cell-level visualization, native/display velocity QC, gene-expression visualization,
@@ -300,7 +303,8 @@ metadata.
 The repository also contains a method-selection tutorial explaining rejected
 alternatives, a guide to complex/loop-like/retrograde branches, and the package-API
 reproduction of the pancreas and RegVelo Schwann decision benchmark, together with
-API reference, diagnostics, scalability guidance, and release notes.
+API reference, diagnostics, scalability guidance, and a
+[Changelog](https://sccs-py.readthedocs.io/en/latest/changelog.html).
 
 Documentation: https://sccs-py.readthedocs.io/
 
@@ -327,11 +331,3 @@ high-memory host, set `SCCS_SCALABILITY_PROFILE=exact_200m` before running the
 scalability notebook, or use
 `benchmarks/v08/run_dffp_200m_no_chunk.py`. The runner fails when the entire
 problem cannot be allocated; it never substitutes a chunked calculation.
-
-### Changes when upgrading from development builds
-
-Undefined CFA, conditional entropy and specificity remain `NaN`. Use explicit
-defined-cell masks and report coverage and DFR; do not replace unknown affinity
-with zero or uniform preference. Whole-replicate undefined outcomes now raise
-during inference. Explicit `undefined_replicates="drop"` exclusions are audited.
-See [rc2 release notes](docs/release_notes.rst) for migration and statistical details.
