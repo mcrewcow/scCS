@@ -31,56 +31,12 @@ independent biological replicates.
 The notebooks retain their recorded outputs and environment information.
 Their figures can be read here without running a notebook locally.
 
-Single-condition workflows
---------------------------
+Tutorial sections
+-----------------
 
-.. toctree::
-   :maxdepth: 1
-
-   tutorials/01_pancreas_single_scorer
-   tutorials/02_schwann_single_scorer
-
-Two-condition workflows
------------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   tutorials/03_pancreas_pair_scorer
-   tutorials/04_schwann_pair_scorer
-
-Three-or-more-condition workflows
----------------------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   tutorials/05_pancreas_multi_scorer
-   tutorials/06_schwann_multi_scorer
-
-Methodology, interpretation, and validation
--------------------------------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   tutorials/07_method_selection
-   tutorials/08_complex_branches
-   tutorials/09_package_decision_reproduction
-
-Downstream analysis
--------------------
-
-.. toctree::
-   :maxdepth: 1
-
-   tutorials/10_pancreas_downstream_analysis
-   tutorials/11_schwann_downstream_analysis
-
-Scalability
------------
-
-.. toctree::
-   :maxdepth: 1
-
-   tutorials/12_scalability_no_chunking
+* :doc:`tutorials_single`: score and visualize one furcation.
+* :doc:`tutorials_pair`: compare two conditions using biological replicates.
+* :doc:`tutorials_multi`: compare three or more conditions.
+* :doc:`tutorials_methods`: understand method choices and complex dynamics.
+* :doc:`tutorials_downstream`: investigate expression and gene associations.
+* :doc:`tutorials_scalability`: measure complete numerical workloads.

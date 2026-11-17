@@ -1,0 +1,12 @@
+.sidebar-version {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--color-foreground-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.sidebar-logo {
+  max-width: 10rem;
+}

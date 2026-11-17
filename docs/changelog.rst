@@ -1,8 +1,8 @@
 Changelog
 =========
 
-1.0.0
------
+1.0.0 — 2026-11-16
+------------------
 
 First stable release of scCS for supervised commitment scoring at annotated
 furcations.

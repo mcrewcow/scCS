@@ -42,7 +42,13 @@ and one of the complete pancreas or Schwann tutorials.
    :maxdepth: 2
    :caption: Tutorials
 
-   tutorials
+   Overview <tutorials>
+   tutorials_single
+   tutorials_pair
+   tutorials_multi
+   tutorials_methods
+   tutorials_downstream
+   tutorials_scalability
 
 .. toctree::
    :maxdepth: 2
