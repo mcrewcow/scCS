@@ -8,5 +8,53 @@ message: Please cite the software repository and the exact package version used.
 repository-code: https://github.com/mcrewcow/scCS
 url: https://sccs-py.readthedocs.io/
 license: MIT
-version: 0.8.0
-date-released: 2026-07-14
+version: 0.8.1rc2
+date-released: 2026-11-16
+references:
+  - type: article
+    title: "Single-cell transcriptomics reveals reversible microglia/macrophage activation after human retinal neuron transplantation into mouse retina"
+    authors:
+      - family-names: Kriukov
+        given-names: Emil
+      - family-names: Mukwaya
+        given-names: Anthony
+      - family-names: Cullen
+        given-names: Paul Francis
+      - family-names: Kam
+        given-names: Hio Tong
+      - family-names: Baldwin
+        given-names: George
+      - family-names: Malechka
+        given-names: Volha V.
+      - family-names: Refaian
+        given-names: Nasrin
+      - family-names: Bagaev
+        given-names: Nikita
+      - family-names: Labrecque
+        given-names: Everett
+      - family-names: Vinjamuri
+        given-names: Sthavir
+      - family-names: Chen
+        given-names: Dong Feng
+      - family-names: Margeta
+        given-names: Milica A.
+      - family-names: Baranov
+        given-names: Petr
+    doi: 10.1016/j.isci.2026.117232
+    journal: iScience
+    year: 2026
+    volume: 29
+    issue: 11
+    start: 117232
+  - type: article
+    title: "Quantitative assessment of cell fate commitment in single-cell transcriptomics using scCS"
+    authors:
+      - family-names: Kriukov
+        given-names: Emil
+      - family-names: Ivleva
+        given-names: Ekaterina
+      - family-names: Baranov
+        given-names: Petr
+    doi: 10.64898/2026.07.27.741070
+    journal: bioRxiv
+    year: 2026

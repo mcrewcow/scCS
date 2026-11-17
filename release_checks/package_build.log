@@ -1,0 +1,273 @@
+* Creating isolated environment: venv+pip...
+* Installing packages in isolated environment:
+  - setuptools>=77.0.3
+  - wheel
+* Getting build dependencies for sdist...
+running egg_info
+writing scCS_py.egg-info/PKG-INFO
+writing dependency_links to scCS_py.egg-info/dependency_links.txt
+writing requirements to scCS_py.egg-info/requires.txt
+writing top-level names to scCS_py.egg-info/top_level.txt
+reading manifest file 'scCS_py.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+no previously-included directories found matching 'docs'
+no previously-included directories found matching 'tutorials'
+no previously-included directories found matching 'release_checks'
+no previously-included directories found matching 'validation_history'
+no previously-included directories found matching 'data'
+no previously-included directories found matching 'tutorial_outputs'
+warning: no previously-included files matching '*-checkpoint.ipynb' found anywhere in distribution
+warning: no previously-included files matching '*.py[cod]' found anywhere in distribution
+warning: no previously-included files matching '.DS_Store' found anywhere in distribution
+adding license file 'LICENSE'
+writing manifest file 'scCS_py.egg-info/SOURCES.txt'
+* Installed build dependency versions:
+  - setuptools==84.2.1
+  - wheel==0.48.0
+* Building sdist...
+running sdist
+running egg_info
+writing scCS_py.egg-info/PKG-INFO
+writing dependency_links to scCS_py.egg-info/dependency_links.txt
+writing requirements to scCS_py.egg-info/requires.txt
+writing top-level names to scCS_py.egg-info/top_level.txt
+reading manifest file 'scCS_py.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+no previously-included directories found matching 'docs'
+no previously-included directories found matching 'tutorials'
+no previously-included directories found matching 'release_checks'
+no previously-included directories found matching 'validation_history'
+no previously-included directories found matching 'data'
+no previously-included directories found matching 'tutorial_outputs'
+warning: no previously-included files matching '*-checkpoint.ipynb' found anywhere in distribution
+warning: no previously-included files matching '*.py[cod]' found anywhere in distribution
+warning: no previously-included files matching '.DS_Store' found anywhere in distribution
+adding license file 'LICENSE'
+writing manifest file 'scCS_py.egg-info/SOURCES.txt'
+running check
+creating sccs_py-0.8.1rc2
+creating sccs_py-0.8.1rc2/benchmarks/v08
+creating sccs_py-0.8.1rc2/scCS
+creating sccs_py-0.8.1rc2/scCS_py.egg-info
+creating sccs_py-0.8.1rc2/tests
+copying files to sccs_py-0.8.1rc2...
+copying .readthedocs.yaml -> sccs_py-0.8.1rc2
+copying CITATION.cff -> sccs_py-0.8.1rc2
+copying INSTALL_CONDA.md -> sccs_py-0.8.1rc2
+copying LICENSE -> sccs_py-0.8.1rc2
+copying MANIFEST.in -> sccs_py-0.8.1rc2
+copying README.md -> sccs_py-0.8.1rc2
+copying RELEASE_NOTES_0.8.1rc2.md -> sccs_py-0.8.1rc2
+copying RELEASE_VALIDATION.md -> sccs_py-0.8.1rc2
+copying TUTORIAL_SUITE_GUIDE.md -> sccs_py-0.8.1rc2
+copying UPLOAD_GITHUB.md -> sccs_py-0.8.1rc2
+copying constraints-tutorials.txt -> sccs_py-0.8.1rc2
+copying environment-tutorials.yml -> sccs_py-0.8.1rc2
+copying pyproject.toml -> sccs_py-0.8.1rc2
+copying setup.cfg -> sccs_py-0.8.1rc2
+copying benchmarks/v08/__init__.py -> sccs_py-0.8.1rc2/benchmarks/v08
+copying benchmarks/v08/pancreas_pseudoconditions.py -> sccs_py-0.8.1rc2/benchmarks/v08
+copying benchmarks/v08/run_dffp_200m_no_chunk.py -> sccs_py-0.8.1rc2/benchmarks/v08
+copying benchmarks/v08/run_dffp_200m_no_chunk.slurm -> sccs_py-0.8.1rc2/benchmarks/v08
+copying scCS/__init__.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/_alignment.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/_replicates.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/_version.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/affinity.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/condition.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/datasets.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/drivers.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/enrichment.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/furcation.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/future_fate.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/geometry.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/inference.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/metrics.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/mixed_models.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/multicomparison.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/ordering.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/pairwise.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/pipeline.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/population.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/preflight.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/projection.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/py.typed -> sccs_py-0.8.1rc2/scCS
+copying scCS/scoring_embedding.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/single.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/transitions.py -> sccs_py-0.8.1rc2/scCS
+copying scCS/tutorial_cache.py -> sccs_py-0.8.1rc2/scCS
+copying scCS_py.egg-info/PKG-INFO -> sccs_py-0.8.1rc2/scCS_py.egg-info
+copying scCS_py.egg-info/SOURCES.txt -> sccs_py-0.8.1rc2/scCS_py.egg-info
+copying scCS_py.egg-info/dependency_links.txt -> sccs_py-0.8.1rc2/scCS_py.egg-info
+copying scCS_py.egg-info/requires.txt -> sccs_py-0.8.1rc2/scCS_py.egg-info
+copying scCS_py.egg-info/top_level.txt -> sccs_py-0.8.1rc2/scCS_py.egg-info
+copying tests/test_rc2_inference.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_release_missingness.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_release_regressions.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_tutorial_support.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_affinity.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_condition.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_drivers_enrichment.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_furcation.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_future_fate.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_geometry.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_mixed_models.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_ordering.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_pancreas_split.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_pipeline.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_population.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_projection.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_scoring_embedding.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_single.py -> sccs_py-0.8.1rc2/tests
+copying tests/test_v08_transitions.py -> sccs_py-0.8.1rc2/tests
+Writing sccs_py-0.8.1rc2/setup.cfg
+Creating tar archive
+removing 'sccs_py-0.8.1rc2' (and everything under it)
+* Building wheel from sdist
+* Creating isolated environment: venv+pip...
+* Installing packages in isolated environment:
+  - setuptools>=77.0.3
+  - wheel
+* Getting build dependencies for wheel...
+running egg_info
+writing scCS_py.egg-info/PKG-INFO
+writing dependency_links to scCS_py.egg-info/dependency_links.txt
+writing requirements to scCS_py.egg-info/requires.txt
+writing top-level names to scCS_py.egg-info/top_level.txt
+reading manifest file 'scCS_py.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+no previously-included directories found matching 'docs'
+no previously-included directories found matching 'tutorials'
+no previously-included directories found matching 'release_checks'
+no previously-included directories found matching 'validation_history'
+no previously-included directories found matching 'data'
+no previously-included directories found matching 'tutorial_outputs'
+warning: no previously-included files matching '*-checkpoint.ipynb' found anywhere in distribution
+warning: no previously-included files matching '*.py[cod]' found anywhere in distribution
+warning: no previously-included files matching '.DS_Store' found anywhere in distribution
+adding license file 'LICENSE'
+writing manifest file 'scCS_py.egg-info/SOURCES.txt'
+* Installed build dependency versions:
+  - setuptools==84.2.1
+  - wheel==0.48.0
+* Building wheel...
+running bdist_wheel
+running build
+running build_py
+creating build/lib/scCS
+copying scCS/tutorial_cache.py -> build/lib/scCS
+copying scCS/transitions.py -> build/lib/scCS
+copying scCS/single.py -> build/lib/scCS
+copying scCS/scoring_embedding.py -> build/lib/scCS
+copying scCS/projection.py -> build/lib/scCS
+copying scCS/preflight.py -> build/lib/scCS
+copying scCS/population.py -> build/lib/scCS
+copying scCS/pipeline.py -> build/lib/scCS
+copying scCS/pairwise.py -> build/lib/scCS
+copying scCS/ordering.py -> build/lib/scCS
+copying scCS/multicomparison.py -> build/lib/scCS
+copying scCS/mixed_models.py -> build/lib/scCS
+copying scCS/metrics.py -> build/lib/scCS
+copying scCS/inference.py -> build/lib/scCS
+copying scCS/geometry.py -> build/lib/scCS
+copying scCS/future_fate.py -> build/lib/scCS
+copying scCS/furcation.py -> build/lib/scCS
+copying scCS/enrichment.py -> build/lib/scCS
+copying scCS/drivers.py -> build/lib/scCS
+copying scCS/datasets.py -> build/lib/scCS
+copying scCS/condition.py -> build/lib/scCS
+copying scCS/affinity.py -> build/lib/scCS
+copying scCS/_version.py -> build/lib/scCS
+copying scCS/_replicates.py -> build/lib/scCS
+copying scCS/_alignment.py -> build/lib/scCS
+copying scCS/__init__.py -> build/lib/scCS
+running egg_info
+writing scCS_py.egg-info/PKG-INFO
+writing dependency_links to scCS_py.egg-info/dependency_links.txt
+writing requirements to scCS_py.egg-info/requires.txt
+writing top-level names to scCS_py.egg-info/top_level.txt
+reading manifest file 'scCS_py.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+no previously-included directories found matching 'docs'
+no previously-included directories found matching 'tutorials'
+no previously-included directories found matching 'release_checks'
+no previously-included directories found matching 'validation_history'
+no previously-included directories found matching 'data'
+no previously-included directories found matching 'tutorial_outputs'
+warning: no previously-included files matching '*-checkpoint.ipynb' found anywhere in distribution
+warning: no previously-included files matching '*.py[cod]' found anywhere in distribution
+warning: no previously-included files matching '.DS_Store' found anywhere in distribution
+adding license file 'LICENSE'
+writing manifest file 'scCS_py.egg-info/SOURCES.txt'
+copying scCS/py.typed -> build/lib/scCS
+installing to build/bdist.linux-x86_64/wheel
+running install
+running install_lib
+creating build/bdist.linux-x86_64/wheel
+creating build/bdist.linux-x86_64/wheel/scCS
+copying build/lib/scCS/py.typed -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/__init__.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/_alignment.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/_replicates.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/_version.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/affinity.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/condition.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/datasets.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/drivers.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/enrichment.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/furcation.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/future_fate.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/geometry.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/inference.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/metrics.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/mixed_models.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/multicomparison.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/ordering.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/pairwise.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/pipeline.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/population.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/preflight.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/projection.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/scoring_embedding.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/single.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/transitions.py -> build/bdist.linux-x86_64/wheel/./scCS
+copying build/lib/scCS/tutorial_cache.py -> build/bdist.linux-x86_64/wheel/./scCS
+running install_egg_info
+Copying scCS_py.egg-info to build/bdist.linux-x86_64/wheel/./scCS_py-0.8.1rc2-py3.12.egg-info
+running install_scripts
+creating build/bdist.linux-x86_64/wheel/sccs_py-0.8.1rc2.dist-info/WHEEL
+creating '/tmp/rc2-dist-final/.tmp-1pkz4g9d/sccs_py-0.8.1rc2-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
+adding 'scCS/__init__.py'
+adding 'scCS/_alignment.py'
+adding 'scCS/_replicates.py'
+adding 'scCS/_version.py'
+adding 'scCS/affinity.py'
+adding 'scCS/condition.py'
+adding 'scCS/datasets.py'
+adding 'scCS/drivers.py'
+adding 'scCS/enrichment.py'
+adding 'scCS/furcation.py'
+adding 'scCS/future_fate.py'
+adding 'scCS/geometry.py'
+adding 'scCS/inference.py'
+adding 'scCS/metrics.py'
+adding 'scCS/mixed_models.py'
+adding 'scCS/multicomparison.py'
+adding 'scCS/ordering.py'
+adding 'scCS/pairwise.py'
+adding 'scCS/pipeline.py'
+adding 'scCS/population.py'
+adding 'scCS/preflight.py'
+adding 'scCS/projection.py'
+adding 'scCS/py.typed'
+adding 'scCS/scoring_embedding.py'
+adding 'scCS/single.py'
+adding 'scCS/transitions.py'
+adding 'scCS/tutorial_cache.py'
+adding 'sccs_py-0.8.1rc2.dist-info/licenses/LICENSE'
+adding 'sccs_py-0.8.1rc2.dist-info/METADATA'
+adding 'sccs_py-0.8.1rc2.dist-info/WHEEL'
+adding 'sccs_py-0.8.1rc2.dist-info/top_level.txt'
+adding 'sccs_py-0.8.1rc2.dist-info/RECORD'
+removing build/bdist.linux-x86_64/wheel
+Successfully built sccs_py-0.8.1rc2.tar.gz and sccs_py-0.8.1rc2-py3-none-any.whl

@@ -15,6 +15,8 @@ standardized supervised display in both modes.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pickle
 import warnings
 from pathlib import Path
@@ -24,6 +26,9 @@ import numpy as np
 from scipy import sparse
 from scipy.stats import rankdata
 
+from .metrics import star_color_metric
+from ._alignment import cell_indices, observation_ids, transition_fingerprint
+from .metrics import metric_label, resolve_metric
 from .affinity import MagnitudeScaler, cosine_softmax_affinity
 from .furcation import Furcation, LabelSpec, TerminalSpec
 from .future_fate import FutureFateScoreResult, score_future_fate
@@ -86,7 +91,9 @@ class SingleScorer:
             self.furcation = furcation
         else:
             if root is None or branches is None:
-                raise ValueError("root and branches are required when furcation is not supplied.")
+                raise ValueError(
+                    "root and branches are required when furcation is not supplied."
+                )
             self.furcation = Furcation(
                 obs_key=obs_key,
                 root=root,
@@ -104,7 +111,10 @@ class SingleScorer:
         self._embedding_result: Optional[ScoringEmbeddingResult] = None
         self._projection_result: Optional[ProjectionResult] = None
         self._transition_matrix = None
-        self._result: Optional[Union[FurcationScoreResult, FutureFateScoreResult]] = None
+        self._vectors_loaded = False
+        self._result: Optional[Union[FurcationScoreResult, FutureFateScoreResult]] = (
+            None
+        )
         self._scoring_mode = "instantaneous"
         self._fitted = False
         self.adata_sub = None
@@ -159,9 +169,13 @@ class SingleScorer:
             import scanpy as sc
             import scvelo as scv
         except ImportError as exc:  # pragma: no cover - environment dependent
-            raise ImportError("scanpy and scvelo are required for compute_velocity().") from exc
+            raise ImportError(
+                "scanpy and scvelo are required for compute_velocity()."
+            ) from exc
 
-        required = [name for name in ("spliced", "unspliced") if name not in self.adata.layers]
+        required = [
+            name for name in ("spliced", "unspliced") if name not in self.adata.layers
+        ]
         if required:
             raise ValueError(f"Missing required layers: {required}.")
 
@@ -370,7 +384,9 @@ class SingleScorer:
 
             def graph_support(graph):
                 if sparse.issparse(graph):
-                    selected = graph.tocsr()[selected_indices][:, selected_indices].copy()
+                    selected = graph.tocsr()[selected_indices][
+                        :, selected_indices
+                    ].copy()
                     selected.data = np.ones_like(selected.data, dtype=np.int8)
                     return selected
                 selected = np.asarray(graph)[np.ix_(selected_indices, selected_indices)]
@@ -387,7 +403,9 @@ class SingleScorer:
                 return_labels=True,
             )
             component_sizes = np.bincount(component_labels, minlength=n_components)
-            largest_component_fraction = float(component_sizes.max() / len(selected_indices))
+            largest_component_fraction = float(
+                component_sizes.max() / len(selected_indices)
+            )
             if scope == "furcation" and n_components > 1:
                 warnings.warn(
                     "The induced furcation velocity graph contains "
@@ -460,13 +478,17 @@ class SingleScorer:
         ordering = self._resolve_ordering_alias(self.adata, ordering_metric)
         if isinstance(ordering, str):
             if ordering not in self.adata.obs:
-                raise KeyError(f"Ordering column {ordering!r} is missing from adata.obs.")
+                raise KeyError(
+                    f"Ordering column {ordering!r} is missing from adata.obs."
+                )
             if invert_ordering:
                 ordering = -self.adata.obs[ordering].to_numpy(dtype=float)
         else:
             ordering = np.asarray(ordering, dtype=float)
             if ordering.ndim != 1 or len(ordering) != self.adata.n_obs:
-                raise ValueError("Array ordering must be one-dimensional and match adata.n_obs.")
+                raise ValueError(
+                    "Array ordering must be one-dimensional and match adata.n_obs."
+                )
             if invert_ordering:
                 ordering = -ordering
 
@@ -487,10 +509,13 @@ class SingleScorer:
         self._ordering_scaler = scaler
         self._arm_scale = float(arm_scale)
         self._embedding_result = embedding
+        self._transition_matrix = None
+        self._vectors_loaded = False
         self._projection_result = None
         self._result = None
         self._fitted = False
 
+        self._cache_subset = bool(cache_subset)
         if cache_subset:
             self.adata_sub = self.adata[embedding.selected_indices].copy()
             self.adata_sub.obsm["X_sccs_score"] = embedding.coordinates.copy()
@@ -550,6 +575,7 @@ class SingleScorer:
             matrix = get_scvelo_transition_matrix(self.adata)
 
         self._transition_matrix = matrix
+        self._vectors_loaded = False
         self._projection_result = project_transition_velocity(
             matrix,
             self._embedding_result.coordinates,
@@ -610,7 +636,7 @@ class SingleScorer:
             raise ValueError("tie_tolerance must be finite and non-negative.")
 
         matrix = self._transition_matrix
-        selected_indices = np.asarray(output.embedding.selected_indices, dtype=int)
+        selected_indices = cell_indices(self.adata, output.cell_ids)
         n_selected = output.n_cells
         if matrix.shape[0] == n_selected and matrix.shape[1] == n_selected:
             retained = matrix
@@ -649,7 +675,9 @@ class SingleScorer:
                     root_weights[:, destination_mask].sum(axis=1)
                 ).ravel()
             else:
-                terminal_mass[:, fate_index] = root_weights[:, destination_mask].sum(axis=1)
+                terminal_mass[:, fate_index] = root_weights[:, destination_mask].sum(
+                    axis=1
+                )
 
         directions = output.embedding.geometry.terminal_directions
         reconstructed_branch = terminal_mass @ directions
@@ -671,11 +699,16 @@ class SingleScorer:
             directions,
             aligned_probability=output.aligned_probability,
         )
-        stored_affinity = np.asarray(output.directional_affinity[root_local], dtype=float)
+        stored_affinity = np.asarray(
+            output.directional_affinity[root_local], dtype=float
+        )
         if np.any(finite_defined):
             max_abs_affinity_error = float(
                 np.max(
-                    np.abs(reconstructed_affinity[finite_defined] - stored_affinity[finite_defined])
+                    np.abs(
+                        reconstructed_affinity[finite_defined]
+                        - stored_affinity[finite_defined]
+                    )
                 )
             )
         else:
@@ -805,7 +838,9 @@ class SingleScorer:
             ),
         )
         for axis, (values, title, label) in zip(axes, panels):
-            image = axis.imshow(values, aspect="auto", interpolation="nearest", cmap=cmap)
+            image = axis.imshow(
+                values, aspect="auto", interpolation="nearest", cmap=cmap
+            )
             axis.set_xticks(np.arange(output.k))
             axis.set_xticklabels(output.fate_names, rotation=30, ha="right")
             axis.set_xlabel("Annotated terminal fate")
@@ -818,7 +853,9 @@ class SingleScorer:
                     np.arange(output.k, dtype=int)[None, :],
                     aspect="auto",
                     interpolation="nearest",
-                    cmap=ListedColormap([fate_colors[str(name)] for name in output.fate_names]),
+                    cmap=ListedColormap(
+                        [fate_colors[str(name)] for name in output.fate_names]
+                    ),
                     vmin=-0.5,
                     vmax=max(output.k - 0.5, 0.5),
                 )
@@ -844,9 +881,9 @@ class SingleScorer:
                 np.argmax(displayed_mass, axis=1)
             ].astype(object)
             dominant[row_total <= np.finfo(float).eps] = "no terminal mass"
-            dominant[(row_total > np.finfo(float).eps) & (margin <= branch_tie_tolerance)] = (
-                "ambiguous"
-            )
+            dominant[
+                (row_total > np.finfo(float).eps) & (margin <= branch_tie_tolerance)
+            ] = "ambiguous"
             categories = [str(name) for name in output.fate_names]
             for fallback in ("ambiguous", "no terminal mass"):
                 if np.any(dominant == fallback):
@@ -857,7 +894,9 @@ class SingleScorer:
                 "no terminal mass": "0.86",
             }
             category_index = {name: index for index, name in enumerate(categories)}
-            codes = np.asarray([category_index[str(name)] for name in dominant], dtype=int)
+            codes = np.asarray(
+                [category_index[str(name)] for name in dominant], dtype=int
+            )
             divider = make_axes_locatable(axes[0])
             branch_axis = divider.append_axes("left", size="3.5%", pad=0.08)
             branch_axis.imshow(
@@ -876,7 +915,9 @@ class SingleScorer:
                 f"Root cells ({len(order)} shown; ordered by {sort_by.replace('_', ' ')})",
                 labelpad=32,
             )
-            fallback = [name for name in ("ambiguous", "no terminal mass") if name in categories]
+            fallback = [
+                name for name in ("ambiguous", "no terminal mass") if name in categories
+            ]
             if fallback:
                 handles = [
                     Patch(facecolor=branch_colors[name], edgecolor="none", label=name)
@@ -929,11 +970,15 @@ class SingleScorer:
             self._embedding_result.dimension,
         )
         if vectors.shape != expected:
-            raise ValueError(f"Projected velocity has shape {vectors.shape}; expected {expected}.")
+            raise ValueError(
+                f"Projected velocity has shape {vectors.shape}; expected {expected}."
+            )
         if not np.all(np.isfinite(vectors)):
             raise ValueError("Projected velocity contains non-finite values.")
 
         n = len(vectors)
+        self._vectors_loaded = True
+        self._transition_matrix = None
         self._projection_result = ProjectionResult(
             velocity=vectors.copy(),
             retained_transition_mass=np.ones(n),
@@ -986,6 +1031,8 @@ class SingleScorer:
         self._check_embedding()
         matrix = transition_matrix
         if matrix is None:
+            matrix = self._transition_matrix
+        if matrix is None:
             matrix = get_scvelo_transition_matrix(self.adata)
         result = score_future_fate(
             self.furcation,
@@ -1006,6 +1053,7 @@ class SingleScorer:
             committed_specificity_threshold=committed_specificity_threshold,
         )
         self._result = result
+        self._vectors_loaded = False
         self._projection_result = result.projection
         self._transition_matrix = matrix
         self._fitted = True
@@ -1096,12 +1144,18 @@ class SingleScorer:
         *,
         write_to_adata: bool = True,
         verbose: bool = True,
+        cache_subset: Optional[bool] = None,
+        compact_metadata: bool = False,
     ) -> Union[FurcationScoreResult, FutureFateScoreResult]:
         """Return cell-level scores and summarize an explicit population.
 
         The fitted cell-level result is common to all summaries.  If
         ``cell_mask`` is supplied, it must be aligned to the selected
         furcation cells and only changes ``scorer.population_summary``.
+        ``cache_subset=None`` respects build_embedding's caching choice; False
+        avoids an extra AnnData copy. ``compact_metadata=True`` omits redundant
+        full-length identity/progression arrays from exported ``uns`` metadata.
+        Use ``write_to_adata=False`` to avoid full-length export allocations.
         """
         self._check_fitted()
         assert self._result is not None
@@ -1110,15 +1164,27 @@ class SingleScorer:
             self.population_summary = self._result.root_population_summary
         else:
             mask = np.asarray(cell_mask)
-            if mask.dtype != bool or mask.ndim != 1 or len(mask) != len(self._result.cell_ids):
+            if (
+                mask.dtype != bool
+                or mask.ndim != 1
+                or len(mask) != len(self._result.cell_ids)
+            ):
                 raise ValueError(
                     "cell_mask must be a Boolean array aligned to selected furcation cells."
                 )
             self.population_summary = self._result.summarize(mask)
 
         if write_to_adata:
-            self._result.write_to_adata(self.adata)
-            self.adata_sub = self.adata[self._result.embedding.selected_indices].copy()
+            self._result.write_to_adata(self.adata, compact_metadata=compact_metadata)
+            keep_subset = (
+                getattr(self, "_cache_subset", True) if cache_subset is None else cache_subset
+            )
+            self._cache_subset = bool(keep_subset)
+            if keep_subset:
+                selected = cell_indices(self.adata, self._result.cell_ids)
+                self.adata_sub = self.adata[selected].copy()
+            else:
+                self.adata_sub = None
 
         if verbose:
             print(self._result.summary())
@@ -1129,6 +1195,74 @@ class SingleScorer:
                     f"total_mass={self.population_summary.total_mass:.4g}"
                 )
         return self._result
+
+    def sensitivity_analysis(
+        self,
+        *,
+        effective_horizons=(32, 64, 128),
+        anchor_quantiles=(0.85, 0.90, 0.95),
+        population="root",
+    ):
+        """Compare a future-fate horizon/anchor grid with the fitted result.
+
+        Returns a compact DataFrame and leaves the fitted scorer unchanged.
+        CFA divergence uses only jointly defined cells; coverage and reach are
+        reported separately. Each grid point is a full graph solve. Graph steps
+        are not physical time, and shorter paths receive less discounting.
+        """
+        self._check_fitted()
+        baseline = self._result
+        if self.scoring_mode != "future_fate":
+            raise ValueError("sensitivity_analysis requires scoring_mode='future_fate'.")
+        if population not in {"root", "all"}:
+            raise ValueError("population must be 'root' or 'all'.")
+        horizons, quantiles = list(effective_horizons), list(anchor_quantiles)
+        if not horizons or not quantiles:
+            raise ValueError("Supply at least one horizon and anchor quantile.")
+        selected = baseline.root_mask if population == "root" else np.ones(baseline.n_cells, bool)
+        competing = {
+            name: baseline.outcome_anchor_mask[:, i]
+            for i, name in enumerate(baseline.outcome_names)
+            if name not in baseline.fate_names
+        }
+        rows = []
+        import pandas as pd
+        from scipy.special import rel_entr
+
+        for horizon in horizons:
+            for quantile in quantiles:
+                candidate = score_future_fate(
+                    self.furcation, self._embedding_result, self._transition_matrix,
+                    effective_horizon=horizon, anchor_quantile=quantile,
+                    min_anchor_cells=baseline.min_anchor_cells,
+                    competing_outcomes=competing or None, min_reach=baseline.min_reach,
+                    progression_values=baseline.progression_values,
+                    progression_scale=baseline.progression_scale,
+                    solver=baseline.solver, direct_max_states=baseline.direct_max_states,
+                    tolerance=baseline.tolerance, max_iter=baseline.max_iter,
+                    committed_reach_threshold=baseline.committed_reach_threshold,
+                    committed_specificity_threshold=baseline.committed_specificity_threshold,
+                )
+                jointly_defined = selected & baseline.affinity_defined & candidate.affinity_defined
+                divergence = float("nan")
+                if jointly_defined.any():
+                    a = baseline.future_fate_affinity[jointly_defined]
+                    b = candidate.future_fate_affinity[jointly_defined]
+                    midpoint = (a + b) / 2
+                    js = 0.5 * (rel_entr(a, midpoint).sum(axis=1)
+                                + rel_entr(b, midpoint).sum(axis=1)) / np.log(2)
+                    divergence = float(np.median(js))
+                rows.append({
+                    "effective_horizon": horizon, "anchor_quantile": quantile,
+                    "population": population, "n_cells": int(selected.sum()),
+                    "n_jointly_defined": int(jointly_defined.sum()),
+                    "affinity_defined_fraction": float(candidate.affinity_defined[selected].mean()),
+                    "mean_discounted_fate_reach": float(candidate.selected_reach[selected].mean()),
+                    "median_cfa_js_bits_vs_fitted": divergence,
+                    "reference_horizon": baseline.effective_horizon,
+                    "reference_anchor_quantile": baseline.anchor_quantile,
+                })
+        return pd.DataFrame(rows)
 
     def score_per_subset(
         self,
@@ -1149,7 +1283,9 @@ class SingleScorer:
         if self.adata_sub is not None and split_by in self.adata_sub.obs:
             values = self.adata_sub.obs[split_by]
         elif split_by in self.adata.obs:
-            values = self.adata.obs.iloc[self._result.embedding.selected_indices][split_by]
+            values = self.adata.obs.iloc[self._result.embedding.selected_indices][
+                split_by
+            ]
         else:
             raise KeyError(f"{split_by!r} is missing from adata.obs.")
 
@@ -1197,6 +1333,12 @@ class SingleScorer:
     def save(self, path: str) -> None:
         """Serialize the scorer state.  Only load trusted files."""
         state = {
+            "state_schema": 2,
+            "observation_ids": observation_ids(self.adata),
+            "scoring_mode": self._scoring_mode,
+            "transition_matrix": self._transition_matrix,
+            "vectors_loaded": self._vectors_loaded,
+            "cache_subset": getattr(self, "_cache_subset", True),
             "furcation": self.furcation,
             "ordering_argument": self._ordering_argument,
             "ordering_scaler": self._ordering_scaler,
@@ -1213,17 +1355,82 @@ class SingleScorer:
         """Load a scorer saved by :meth:`save`.  Only load trusted files."""
         state = pickle.loads(Path(path).read_bytes())
         scorer = cls(adata, furcation=state["furcation"])
+        saved_ids = state.get("observation_ids")
+        embedding = state["embedding_result"]
+        if saved_ids is None and embedding is not None:
+            saved_ids = getattr(embedding, "observation_ids", None)
+        if saved_ids is None:
+            # A partial selection cannot certify the unselected graph axis.
+            if embedding is not None and (
+                len(embedding.selected_indices) != adata.n_obs
+                or not np.array_equal(
+                    observation_ids(adata)[embedding.selected_indices],
+                    embedding.selected_cell_ids,
+                )
+            ):
+                raise ValueError(
+                    "Legacy scorer state has no full cell axis; rebuild it with this release."
+                )
+            permutation = np.arange(adata.n_obs)
+        else:
+            if len(saved_ids) != adata.n_obs:
+                raise ValueError(
+                    "Saved scorer and AnnData must contain the same full cell set."
+                )
+            saved_to_target = cell_indices(adata, saved_ids)
+            permutation = np.argsort(saved_to_target)
         scorer._ordering_argument = state["ordering_argument"]
+        if scorer._ordering_argument is not None and not isinstance(
+            scorer._ordering_argument, str
+        ):
+            scorer._ordering_argument = np.asarray(scorer._ordering_argument)[
+                permutation
+            ]
         scorer._ordering_scaler = state["ordering_scaler"]
         scorer._arm_scale = state["arm_scale"]
-        scorer._embedding_result = state["embedding_result"]
-        scorer._projection_result = state["projection_result"]
-        scorer._result = state["result"]
+        result = state["result"]
+        scorer._scoring_mode = state.get(
+            "scoring_mode", getattr(result, "scoring_mode", "instantaneous")
+        )
+        matrix = state.get("transition_matrix")
+        if matrix is not None:
+            matrix = sparse.csr_matrix(matrix)
+            matrix = matrix[permutation][:, permutation].tocsr()
+        scorer._transition_matrix = matrix
+        scorer._vectors_loaded = state.get("vectors_loaded", False)
+        scorer._cache_subset = state.get("cache_subset", True)
+        projection = state["projection_result"]
+        if embedding is not None:
+            selected = cell_indices(adata, embedding.selected_cell_ids)
+            embedding = replace(
+                embedding,
+                selected_indices=selected,
+                observation_ids=observation_ids(adata),
+            )
+            if projection is not None:
+                projection = replace(projection, selected_indices=selected.copy())
+            if result is not None:
+                result = replace(result, embedding=embedding, projection=projection)
+                if isinstance(result, FutureFateScoreResult):
+                    normalization = replace(
+                        result.transition_normalization,
+                        matrix=result.transition_normalization.matrix[permutation][
+                            :, permutation
+                        ].tocsr(),
+                    )
+                    result = replace(
+                        result,
+                        transition_normalization=normalization,
+                        outcome_anchor_mask=result.outcome_anchor_mask[permutation],
+                        graph_fingerprint=transition_fingerprint(normalization.matrix),
+                    )
+            scorer.adata_sub = adata[selected].copy() if scorer._cache_subset else None
+        scorer._embedding_result = embedding
+        scorer._projection_result = projection
+        scorer._result = result
         scorer._fitted = bool(state["fitted"])
-        if scorer._embedding_result is not None:
-            scorer.adata_sub = adata[scorer._embedding_result.selected_indices].copy()
-        if scorer._result is not None:
-            scorer.population_summary = scorer._result.root_population_summary
+        if result is not None:
+            scorer.population_summary = result.root_population_summary
         return scorer
 
     def _selected_display_ordering(
@@ -1256,12 +1463,19 @@ class SingleScorer:
                     raise RuntimeError(
                         "Stored ordering is not one-dimensional or no longer matches adata.n_obs."
                     )
-            values = np.asarray(full[output.embedding.selected_indices], dtype=float)
-            if self._ordering_scaler is not None and not self._ordering_scaler.higher_is_later:
+            values = np.asarray(
+                full[cell_indices(self.adata, output.cell_ids)], dtype=float
+            )
+            if (
+                self._ordering_scaler is not None
+                and not self._ordering_scaler.higher_is_later
+            ):
                 values = -values
 
         if values.ndim != 1 or len(values) != len(output.cell_ids):
-            raise RuntimeError("Stored display ordering is not aligned to result cells.")
+            raise RuntimeError(
+                "Stored display ordering is not aligned to result cells."
+            )
         if not np.all(np.isfinite(values)):
             raise ValueError("Selected display ordering contains non-finite values.")
         return values
@@ -1366,7 +1580,10 @@ class SingleScorer:
                 "terminal_layout must be 'ordering', 'rank', or 'endpoint'. "
                 "The legacy aliases 'pseudotime' and 'branch' are also accepted."
             )
-        if not np.isfinite(terminal_inner_radius) or not 0.0 <= terminal_inner_radius < 1.0:
+        if (
+            not np.isfinite(terminal_inner_radius)
+            or not 0.0 <= terminal_inner_radius < 1.0
+        ):
             raise ValueError("terminal_inner_radius must lie in [0, 1).")
 
         ordering = output.embedding.ordering
@@ -1391,7 +1608,9 @@ class SingleScorer:
         selected_global_progress = None
         if terminal_layout == "ordering":
             assert selected_display_ordering is not None
-            selected_global_progress = self._global_ordering_progress(selected_display_ordering)
+            selected_global_progress = self._global_ordering_progress(
+                selected_display_ordering
+            )
 
         terminal_base_radius = np.zeros(n, dtype=float)
         for name in output.fate_names:
@@ -1440,7 +1659,9 @@ class SingleScorer:
                 perpendicular = np.array([-direction[1], direction[0]])
                 radius = terminal_base_radius[mask]
                 tangential_taper = 0.20 + 0.80 * (radius / arm_scale)
-                tangential_noise = rng.normal(0.0, jitter, size=mask.sum()) * tangential_taper
+                tangential_noise = (
+                    rng.normal(0.0, jitter, size=mask.sum()) * tangential_taper
+                )
                 radial_noise = rng.normal(
                     0.0,
                     terminal_radial_jitter,
@@ -1452,6 +1673,42 @@ class SingleScorer:
                 )
 
         return coords, arm_directions
+
+    @staticmethod
+    def _star_metric_values(output, color_by):
+        """Resolve continuous star values for shared panel normalization."""
+        mode = getattr(output, "scoring_mode", "instantaneous")
+        color_by = star_color_metric(color_by, mode)
+        if ":" in color_by:
+            prefix, fate = color_by.split(":", 1)
+            if fate not in output.fate_names:
+                raise ValueError(f"Unknown fate {fate!r}.")
+            metric = resolve_metric(prefix, mode)
+            if metric == "directional_affinity":
+                values = output.directional_affinity
+            elif metric == "mean_commitment_contribution":
+                values = output.commitment_contribution
+            elif metric == "commitment_affinity":
+                values = output.commitment.commitment_affinity
+            else:
+                return None
+            return values[:, output.fate_names.index(fate)]
+        metric = resolve_metric(color_by, mode)
+        if metric == "transition_coverage":
+            return output.projection.transition_coverage
+        if metric in {
+            "specific_commitment",
+            "commitment_strength",
+            "directional_specificity",
+            "directional_entropy",
+            "commitment_entropy",
+            "progression_velocity",
+            "nearest_fate_angle_degrees",
+            "unresolved_probability",
+            "competing_reach",
+        }:
+            return np.asarray(getattr(output, metric), dtype=float)
+        return None
 
     def plot_star(
         self,
@@ -1519,27 +1776,10 @@ class SingleScorer:
         output = self._result if result is None else result
         assert output is not None
         future_mode = getattr(output, "scoring_mode", "instantaneous") == "future_fate"
-        color_aliases = {
-            "future_fate_reach": "commitment_strength",
-            "discounted_fate_reach": "commitment_strength",
-            "future_fate_specificity": "directional_specificity",
-            "future_fate_entropy": "directional_entropy",
-            "reach_supported_specificity": "specific_commitment",
-            "resolved_commitment": "specific_commitment",
-            "signed_progression": "progression_velocity",
-            "signed_ordering_flux": "progression_velocity",
-            "selected_path_coverage": "transition_coverage",
-        }
-        if ":" in color_by:
-            prefix, fate = color_by.split(":", 1)
-            prefix = {
-                "future_fate_affinity": "affinity",
-                "conditional_fate_affinity": "affinity",
-                "future_fate_contribution": "commitment_contribution",
-            }.get(prefix, prefix)
-            color_by = f"{prefix}:{fate}"
-        else:
-            color_by = color_aliases.get(color_by, color_by)
+        self._star_metric_values(
+            output, color_by
+        )  # Validate mode-specific names before aliasing.
+        color_by = star_color_metric(color_by, getattr(output, "scoring_mode", "instantaneous"))
 
         if cell_mask is None:
             display_mask = np.ones(output.n_cells, dtype=bool)
@@ -1550,7 +1790,9 @@ class SingleScorer:
                 or display_mask.ndim != 1
                 or len(display_mask) != output.n_cells
             ):
-                raise ValueError("cell_mask must be a Boolean array aligned to result cells.")
+                raise ValueError(
+                    "cell_mask must be a Boolean array aligned to result cells."
+                )
             if not np.any(display_mask):
                 raise ValueError("cell_mask selects zero cells.")
 
@@ -1563,7 +1805,9 @@ class SingleScorer:
                 or supplied_color_mask.ndim != 1
                 or len(supplied_color_mask) != output.n_cells
             ):
-                raise ValueError("color_mask must be a Boolean array aligned to result cells.")
+                raise ValueError(
+                    "color_mask must be a Boolean array aligned to result cells."
+                )
             colored_mask = display_mask & supplied_color_mask
             if not np.any(colored_mask):
                 raise ValueError("color_mask selects zero displayed cells.")
@@ -1631,6 +1875,11 @@ class SingleScorer:
             "transition_coverage": output.projection.transition_coverage,
             "progression_velocity": output.progression_velocity,
         }
+        if future_mode:
+            continuous.update(
+                unresolved_probability=output.unresolved_probability,
+                competing_reach=output.competing_reach,
+            )
         fate_specific = None
         fate_specific_label = None
         if ":" in color_by:
@@ -1654,7 +1903,7 @@ class SingleScorer:
                     if future_mode
                     else f"Commitment affinity: {fate}"
                 )
-            elif prefix in {"contribution", "commitment_contribution"}:
+            elif prefix == "mean_commitment_contribution":
                 fate_specific = output.commitment_contribution[:, fate_index]
                 fate_specific_label = (
                     f"Future-fate contribution: {fate}"
@@ -1679,12 +1928,18 @@ class SingleScorer:
                 raise ValueError("color_values contains non-finite colored values.")
 
         default_title = None
-        if external_values is not None or color_by in continuous or fate_specific is not None:
+        if (
+            external_values is not None
+            or color_by in continuous
+            or fate_specific is not None
+        ):
             if external_values is not None:
                 values = external_values
                 label = "value" if color_label is None else str(color_label)
             else:
-                values = continuous[color_by] if fate_specific is None else fate_specific
+                values = (
+                    continuous[color_by] if fate_specific is None else fate_specific
+                )
                 continuous_labels = (
                     {
                         "specific_commitment": "Reach-supported specificity",
@@ -1713,18 +1968,45 @@ class SingleScorer:
                     if fate_specific_label is None
                     else fate_specific_label
                 )
+            if external_values is None and fate_specific is None:
+                label = metric_label(
+                    color_by,
+                    scoring_mode="future_fate" if future_mode else "instantaneous",
+                )
             default_title = label
             values = np.asarray(values, dtype=float)
             indices = np.flatnonzero(colored_mask)
             if sort_by_color:
                 indices = indices[np.argsort(values[indices], kind="stable")]
+            norm = None
+            if external_values is None:
+                if color_by == "progression_velocity":
+                    from matplotlib.colors import TwoSlopeNorm
+
+                    finite = values[colored_mask & np.isfinite(values)]
+                    bound = max(
+                        float(np.max(np.abs(finite))) if finite.size else 0.0, 1e-12
+                    )
+                    low = -bound if vmin is None else vmin
+                    high = bound if vmax is None else vmax
+                    if low < 0 < high:
+                        norm = TwoSlopeNorm(vmin=low, vcenter=0.0, vmax=high)
+                        vmin = vmax = None
+                    cmap = "coolwarm" if cmap is None else cmap
+                elif color_by != "nearest_fate_angle_degrees":
+                    vmin = 0.0 if vmin is None else vmin
+                    vmax = 1.0 if vmax is None else vmax
+            display_cmap = plt.get_cmap(cmap or "viridis").copy()
+            display_cmap.set_bad("0.72")
             scatter = ax.scatter(
                 coords[indices, 0],
                 coords[indices, 1],
                 c=values[indices],
-                cmap=cmap,
+                cmap=display_cmap,
                 vmin=vmin,
                 vmax=vmax,
+                norm=norm,
+                plotnonfinite=True,
                 s=point_size,
                 alpha=alpha,
                 linewidths=0.0,
@@ -1735,7 +2017,10 @@ class SingleScorer:
             default_title = "Cell annotation"
             groups = [(str(self.root), output.root_mask)]
             groups.extend(
-                (str(name), output.terminal_mask & (output.embedding.terminal_names == name))
+                (
+                    str(name),
+                    output.terminal_mask & (output.embedding.terminal_names == name),
+                )
                 for name in output.fate_names
             )
             color_cycle = plt.get_cmap("tab10").colors
@@ -1877,7 +2162,9 @@ class SingleScorer:
             title = default_title or "scCS supervised furcation"
             if terminal_layout in {"ordering", "pseudotime", "branch"}:
                 ordering_key = output.embedding.ordering_key
-                display_ordering = ordering_key if ordering_label is None else str(ordering_label)
+                display_ordering = (
+                    ordering_key if ordering_label is None else str(ordering_label)
+                )
                 if display_ordering:
                     title += f"\nTerminal placement: {display_ordering}"
         ax.set_title(title)
@@ -1898,9 +2185,7 @@ class SingleScorer:
 
         matrix = self._transition_matrix
         indices = np.asarray(output.embedding.selected_indices, dtype=int)
-        if matrix.shape == (output.n_cells, output.n_cells):
-            retained = matrix.copy()
-        elif sparse.issparse(matrix):
+        if sparse.issparse(matrix):
             retained = matrix.tocsr()[indices][:, indices].copy()
         else:
             dense = np.asarray(matrix, dtype=float)
@@ -2022,7 +2307,7 @@ class SingleScorer:
             terminal_layout=terminal_layout,
             terminal_inner_radius=terminal_inner_radius,
         )
-        selected_indices = np.asarray(output.embedding.selected_indices, dtype=int)
+        selected_indices = cell_indices(self.adata, output.cell_ids)
         adata_star = self.adata[selected_indices].copy()
         adata_star.obsm[f"X_{basis}"] = coordinates.copy()
         if self.obs_key in adata_star.obs:
@@ -2112,7 +2397,8 @@ class SingleScorer:
         coordinates = np.asarray(adata_star.obsm["X_sccs"], dtype=float)
         velocity = np.asarray(adata_star.obsm[f"{vkey}_sccs"], dtype=float)
         defined = np.isfinite(velocity).all(axis=1) & (
-            np.linalg.norm(np.nan_to_num(velocity, nan=0.0), axis=1) > np.finfo(float).eps
+            np.linalg.norm(np.nan_to_num(velocity, nan=0.0), axis=1)
+            > np.finfo(float).eps
         )
         return coordinates, ProjectionResult(
             velocity=velocity,
@@ -2120,7 +2406,9 @@ class SingleScorer:
             external_transition_mass=output.projection.external_transition_mass.copy(),
             transition_coverage=output.projection.transition_coverage.copy(),
             velocity_defined=defined,
-            selected_indices=np.asarray(output.embedding.selected_indices, dtype=int).copy(),
+            selected_indices=np.asarray(
+                output.embedding.selected_indices, dtype=int
+            ).copy(),
             renormalized=output.projection.renormalized,
             min_coverage=output.projection.min_coverage,
         )
@@ -2217,14 +2505,15 @@ class SingleScorer:
         metadata = self.adata.uns.get("sccs_v08", {}).get("pseudotime", {})
         ordering_key = str(output.embedding.ordering_key)
         root_key = metadata.get(ordering_key, {}).get("root_key")
-        selected_indices = np.asarray(output.embedding.selected_indices, dtype=int)
+        selected_indices = cell_indices(self.adata, output.cell_ids)
         selected_root_local_index = int(root_local[np.argmin(progress[root])])
         if root_key is not None:
             root_key_text = str(root_key)
             candidate_local = None
             if root_key_text in self.adata.obs_names:
                 matches = np.flatnonzero(
-                    np.asarray(self.adata.obs_names[selected_indices]).astype(str) == root_key_text
+                    np.asarray(self.adata.obs_names[selected_indices]).astype(str)
+                    == root_key_text
                 )
                 if len(matches) == 1:
                     candidate_local = int(matches[0])
@@ -2240,7 +2529,9 @@ class SingleScorer:
                 selected_root_local_index = candidate_local
 
         selected_root_progress = float(progress[selected_root_local_index])
-        selected_root_radius = float(np.linalg.norm(coordinates[selected_root_local_index]))
+        selected_root_radius = float(
+            np.linalg.norm(coordinates[selected_root_local_index])
+        )
 
         return RootProgressionDirectionDiagnostics(
             root_local_indices=root_local,
@@ -2250,17 +2541,23 @@ class SingleScorer:
             transition_display_centerward_velocity=np.asarray(
                 transition_centerward, dtype=float
             ).copy(),
-            scvelo_display_centerward_velocity=np.asarray(native_centerward, dtype=float).copy(),
+            scvelo_display_centerward_velocity=np.asarray(
+                native_centerward, dtype=float
+            ).copy(),
             selected_root_local_index=int(selected_root_local_index),
             selected_root_progress=selected_root_progress,
             selected_root_radius=selected_root_radius,
             max_abs_progression_identity_error=max_identity_error,
-            forward_expected_progress_fraction=self._finite_positive_fraction(expected_root),
+            forward_expected_progress_fraction=self._finite_positive_fraction(
+                expected_root
+            ),
             forward_scientific_fraction=self._finite_positive_fraction(scientific),
             forward_transition_display_fraction=self._finite_positive_fraction(
                 transition_centerward
             ),
-            forward_scvelo_display_fraction=self._finite_positive_fraction(native_centerward),
+            forward_scvelo_display_fraction=self._finite_positive_fraction(
+                native_centerward
+            ),
         )
 
     def plot_root_progression_direction_diagnostics(
@@ -2443,8 +2740,14 @@ class SingleScorer:
         )
         if mask is not None:
             selected = np.asarray(mask)
-            if selected.dtype != bool or selected.ndim != 1 or len(selected) != output.n_cells:
-                raise ValueError("mask must be a Boolean array aligned to result cells.")
+            if (
+                selected.dtype != bool
+                or selected.ndim != 1
+                or len(selected) != output.n_cells
+            ):
+                raise ValueError(
+                    "mask must be a Boolean array aligned to result cells."
+                )
         elif population == "root":
             selected = output.root_mask.copy()
         elif population == "terminal":
@@ -2582,7 +2885,9 @@ class SingleScorer:
         write_to_adata = kwargs.pop("write_to_adata", True)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword arguments for mode='cell': {unexpected}.")
+            raise TypeError(
+                f"Unexpected keyword arguments for mode='cell': {unexpected}."
+            )
 
         adata_star = self.prepare_scvelo_star_embedding(
             output,
@@ -2596,8 +2901,14 @@ class SingleScorer:
         )
         if mask is not None:
             selected = np.asarray(mask)
-            if selected.dtype != bool or selected.ndim != 1 or len(selected) != output.n_cells:
-                raise ValueError("mask must be a Boolean array aligned to result cells.")
+            if (
+                selected.dtype != bool
+                or selected.ndim != 1
+                or len(selected) != output.n_cells
+            ):
+                raise ValueError(
+                    "mask must be a Boolean array aligned to result cells."
+                )
         elif population == "root":
             selected = output.root_mask.copy()
         elif population == "terminal":
@@ -2693,15 +3004,21 @@ class SingleScorer:
 
         if len(matches) == 0:
             source_name = "adata.raw" if use_raw else "adata"
-            qualifier = f" column {gene_symbols!r}" if gene_symbols is not None else " var_names"
-            raise KeyError(f"Gene {requested!r} was not found in {source_name}{qualifier}.")
+            qualifier = (
+                f" column {gene_symbols!r}"
+                if gene_symbols is not None
+                else " var_names"
+            )
+            raise KeyError(
+                f"Gene {requested!r} was not found in {source_name}{qualifier}."
+            )
         if len(matches) > 1:
             raise ValueError(
                 f"Gene {requested!r} maps to {len(matches)} variables; "
                 "gene identifiers must be unique."
             )
 
-        selected_indices = np.asarray(output.embedding.selected_indices, dtype=int)
+        selected_indices = cell_indices(self.adata, output.cell_ids)
         if matrix.shape[0] != self.adata.n_obs:
             raise ValueError(
                 "Expression source does not have the same observation axis as "
@@ -2716,12 +3033,18 @@ class SingleScorer:
             values = values.toarray()
         values = np.asarray(values, dtype=float).reshape(-1)
         if len(values) != output.n_cells:
-            raise RuntimeError("Gene expression values are not aligned to result cells.")
+            raise RuntimeError(
+                "Gene expression values are not aligned to result cells."
+            )
         if not np.all(np.isfinite(values)):
-            raise ValueError(f"Expression values for {requested!r} contain non-finite values.")
+            raise ValueError(
+                f"Expression values for {requested!r} contain non-finite values."
+            )
         if log1p:
             if np.any(values < -1.0):
-                raise ValueError("log1p=True requires all expression values to be at least -1.")
+                raise ValueError(
+                    "log1p=True requires all expression values to be at least -1."
+                )
             values = np.log1p(values)
             source_label = f"log1p({source_label})"
         return values, source_label
@@ -2749,7 +3072,9 @@ class SingleScorer:
                 raise ValueError("percentile_range must contain exactly two values.")
             low_q, high_q = map(float, percentile_range)
             if not 0.0 <= low_q < high_q <= 100.0:
-                raise ValueError("percentile_range must satisfy 0 <= low < high <= 100.")
+                raise ValueError(
+                    "percentile_range must satisfy 0 <= low < high <= 100."
+                )
             lower, upper = map(
                 float,
                 np.percentile(displayed, [low_q, high_q]),
@@ -2855,7 +3180,9 @@ class SingleScorer:
                 or display_mask.ndim != 1
                 or len(display_mask) != output.n_cells
             ):
-                raise ValueError("cell_mask must be a Boolean array aligned to result cells.")
+                raise ValueError(
+                    "cell_mask must be a Boolean array aligned to result cells."
+                )
             if not np.any(display_mask):
                 raise ValueError("cell_mask selects zero cells.")
 
@@ -2956,7 +3283,9 @@ class SingleScorer:
         if population not in {"root", "all"}:
             raise ValueError("population must be 'root' or 'all'.")
         mask = (
-            output.root_mask if population == "root" else np.ones(len(output.cell_ids), dtype=bool)
+            output.root_mask
+            if population == "root"
+            else np.ones(len(output.cell_ids), dtype=bool)
         )
 
         import matplotlib.pyplot as plt
@@ -3026,7 +3355,9 @@ class SingleScorer:
                 or values_mask.ndim != 1
                 or len(values_mask) != output.n_cells
             ):
-                raise ValueError("mask must be a Boolean array aligned to result.cell_ids.")
+                raise ValueError(
+                    "mask must be a Boolean array aligned to result.cell_ids."
+                )
             summary = output.summarize(values_mask)
             population_label = "custom population"
         elif population == "root":
@@ -3193,8 +3524,14 @@ class SingleScorer:
 
         if mask is not None:
             selected = np.asarray(mask)
-            if selected.dtype != bool or selected.ndim != 1 or len(selected) != output.n_cells:
-                raise ValueError("mask must be a Boolean array aligned to result cells.")
+            if (
+                selected.dtype != bool
+                or selected.ndim != 1
+                or len(selected) != output.n_cells
+            ):
+                raise ValueError(
+                    "mask must be a Boolean array aligned to result cells."
+                )
         elif population == "root":
             selected = output.root_mask.copy()
         elif population == "terminal":
@@ -3309,7 +3646,9 @@ class SingleScorer:
             edges = np.linspace(0.0, 2.0 * np.pi, n_bins + 1)
             mass, _ = np.histogram(branch_angles, bins=edges, weights=weights)
             centers = 0.5 * (edges[:-1] + edges[1:])
-            distance = np.abs(np.angle(np.exp(1j * (centers[:, None] - fate_angles[None, :]))))
+            distance = np.abs(
+                np.angle(np.exp(1j * (centers[:, None] - fate_angles[None, :])))
+            )
             nearest_bin_fate = np.argmin(distance, axis=1)
             if normalization == "within_fate":
                 plotted_mass = np.zeros_like(mass, dtype=float)
@@ -3367,13 +3706,17 @@ class SingleScorer:
             finite = np.isfinite(display_vectors).all(axis=1)
             display_vectors = display_vectors[finite]
             if display_vectors.size == 0:
-                raise ValueError("No finite scVelo star-embedding velocities were selected.")
+                raise ValueError(
+                    "No finite scVelo star-embedding velocities were selected."
+                )
             display_magnitudes = np.linalg.norm(display_vectors, axis=1)
             positive = display_magnitudes > np.finfo(float).eps
             display_vectors = display_vectors[positive]
             display_magnitudes = display_magnitudes[positive]
             if display_vectors.size == 0:
-                raise ValueError("No nonzero scVelo star-embedding velocities were selected.")
+                raise ValueError(
+                    "No nonzero scVelo star-embedding velocities were selected."
+                )
             display_angles = np.mod(
                 np.arctan2(display_vectors[:, 1], display_vectors[:, 0]),
                 2.0 * np.pi,
@@ -3399,7 +3742,9 @@ class SingleScorer:
                 ],
                 dtype=float,
             )
-            distance = np.abs(np.angle(np.exp(1j * (centers[:, None] - fate_angles[None, :]))))
+            distance = np.abs(
+                np.angle(np.exp(1j * (centers[:, None] - fate_angles[None, :])))
+            )
             nearest_bin_fate = np.argmin(distance, axis=1)
             display_total_magnitude = float(display_magnitudes.sum())
             if normalization == "within_fate":
@@ -3487,7 +3832,9 @@ class SingleScorer:
             mass, _ = np.histogram(angles, bins=edges, weights=magnitudes)
             centers = 0.5 * (edges[:-1] + edges[1:])
             fate_angles = np.mod(np.arctan2(fate_xy[:, 1], fate_xy[:, 0]), 2.0 * np.pi)
-            distance = np.abs(np.angle(np.exp(1j * (centers[:, None] - fate_angles[None, :]))))
+            distance = np.abs(
+                np.angle(np.exp(1j * (centers[:, None] - fate_angles[None, :])))
+            )
             nearest_bin_fate = np.argmin(distance, axis=1)
             if normalization == "within_fate":
                 plotted_mass = np.zeros_like(mass, dtype=float)
@@ -3656,7 +4003,9 @@ class SingleScorer:
             raise ValueError("n_bins must be an integer of at least 8.")
         normalization = str(normalization).lower()
         if normalization not in {"within_branch", "mass", "global_fraction"}:
-            raise ValueError("normalization must be 'within_branch', 'mass', or 'global_fraction'.")
+            raise ValueError(
+                "normalization must be 'within_branch', 'mass', or 'global_fraction'."
+            )
 
         import matplotlib.pyplot as plt
 
@@ -3738,7 +4087,9 @@ class SingleScorer:
             if normalization == "within_branch":
                 plotted = mass / raw_total if raw_total > 0.0 else np.zeros_like(mass)
             elif normalization == "global_fraction":
-                plotted = mass / global_total if global_total > 0.0 else np.zeros_like(mass)
+                plotted = (
+                    mass / global_total if global_total > 0.0 else np.zeros_like(mass)
+                )
             else:
                 plotted = mass
             plotted_max = max(plotted_max, float(np.max(plotted, initial=0.0)))
@@ -3817,7 +4168,9 @@ class SingleScorer:
     ):
         """Compatibility wrapper for a v0.8 population commitment bar chart."""
         if metric == "pairwise_log_commitment_ratio":
-            raise ValueError("Use plot_pairwise_cs() for pairwise log commitment ratios.")
+            raise ValueError(
+                "Use plot_pairwise_cs() for pairwise log commitment ratios."
+            )
         return self.plot_population_commitment(
             result=result,
             population=population,
@@ -3865,6 +4218,7 @@ class SingleScorer:
         self._check_fitted()
         output = self._result if result is None else result
         assert output is not None
+        resolve_metric(str(metric), getattr(output, "scoring_mode", "instantaneous"))
         metric_aliases = {
             "future_fate_affinity": "directional_affinity",
             "conditional_fate_affinity": "directional_affinity",
@@ -3896,8 +4250,14 @@ class SingleScorer:
 
         if mask is not None:
             selected = np.asarray(mask)
-            if selected.dtype != bool or selected.ndim != 1 or len(selected) != output.n_cells:
-                raise ValueError("mask must be a Boolean array aligned to result cells.")
+            if (
+                selected.dtype != bool
+                or selected.ndim != 1
+                or len(selected) != output.n_cells
+            ):
+                raise ValueError(
+                    "mask must be a Boolean array aligned to result cells."
+                )
         elif population == "root":
             selected = output.root_mask.copy()
         elif population == "terminal":
@@ -3976,7 +4336,10 @@ class SingleScorer:
             population_values, categories, _, _ = annotation_values("population")
             category_index = {name: index for index, name in enumerate(categories)}
             population_codes = np.asarray(
-                [category_index.get(name, len(categories)) for name in population_values],
+                [
+                    category_index.get(name, len(categories))
+                    for name in population_values
+                ],
                 dtype=int,
             )
             local_order = np.lexsort(
@@ -4008,7 +4371,16 @@ class SingleScorer:
 
         if ax is None:
             _, ax = plt.subplots(figsize=(7.0, 6.0))
-        image = ax.imshow(matrices[metric][rows], aspect="auto", interpolation="nearest")
+        heatmap_cmap = plt.get_cmap("viridis").copy()
+        heatmap_cmap.set_bad("0.72")
+        image = ax.imshow(
+            matrices[metric][rows],
+            aspect="auto",
+            interpolation="nearest",
+            cmap=heatmap_cmap,
+            vmin=0.0,
+            vmax=1.0,
+        )
 
         from matplotlib.colors import ListedColormap
         from matplotlib.patches import Patch
@@ -4021,7 +4393,9 @@ class SingleScorer:
             values, categories, colors, annotation_label = annotation_values(annotation)
             present = [name for name in categories if np.any(values[rows] == name)]
             category_index = {name: index for index, name in enumerate(present)}
-            codes = np.asarray([category_index[name] for name in values[rows]], dtype=int)
+            codes = np.asarray(
+                [category_index[name] for name in values[rows]], dtype=int
+            )
             annotation_ax = divider.append_axes(
                 "left",
                 size="4%",
@@ -4048,6 +4422,7 @@ class SingleScorer:
                 short_titles.get(annotation, annotation_label),
                 fontsize=8,
                 pad=3,
+                rotation=90,
             )
             annotation_axes.append(annotation_ax)
 
@@ -4083,7 +4458,9 @@ class SingleScorer:
 
         if show_fate_strip:
             color_cycle = plt.get_cmap("tab10").colors
-            fate_colors = [color_cycle[(index + 1) % len(color_cycle)] for index in range(output.k)]
+            fate_colors = [
+                color_cycle[(index + 1) % len(color_cycle)] for index in range(output.k)
+            ]
             fate_ax = divider.append_axes("top", size="3%", pad=0.05, sharex=ax)
             fate_ax.imshow(
                 np.arange(output.k, dtype=int)[None, :],
@@ -4096,7 +4473,7 @@ class SingleScorer:
             fate_ax.set_xticks([])
             fate_ax.set_yticks([])
             fate_ax.set_title("Fate", fontsize=8, loc="left", pad=2)
-            fate_ax.tick_params(left=False, bottom=False)
+            fate_ax.tick_params(left=False, bottom=False, labelbottom=False)
 
         ax.set_xticks(np.arange(output.k))
         ax.set_xticklabels(output.fate_names, rotation=30, ha="right")
@@ -4109,8 +4486,16 @@ class SingleScorer:
         else:
             ax.set_ylabel(row_label)
         title_pad = 28 if show_fate_strip else 6
-        ax.set_title(metric.replace("_", " ").title(), pad=title_pad)
-        ax.figure.colorbar(image, ax=ax, label=metric.replace("_", " "))
+        label = metric_label(
+            (
+                "mean_commitment_contribution"
+                if metric == "commitment_contribution"
+                else metric
+            ),
+            scoring_mode=getattr(output, "scoring_mode", "instantaneous"),
+        )
+        ax.set_title(label, pad=title_pad)
+        ax.figure.colorbar(image, ax=ax, label=label)
         return ax.figure
 
     def plot_subset_comparison(
@@ -4199,22 +4584,44 @@ class SingleScorer:
                 int(np.nanargmax(output.root_population_summary.commitment_composition))
             ]
         if fate not in output.fate_names:
-            raise ValueError(f"Unknown fate {fate!r}; expected one of {output.fate_names!r}.")
+            raise ValueError(
+                f"Unknown fate {fate!r}; expected one of {output.fate_names!r}."
+            )
         fate_index = output.fate_names.index(fate)
 
         x_axis = str(x_axis).lower()
+        mode = getattr(output, "scoring_mode", "instantaneous")
+        if x_axis not in {
+            "ordering",
+            "pseudotime",
+            "affinity",
+            "contribution",
+            "commitment_contribution",
+        }:
+            x_axis = resolve_metric(x_axis, mode)
+        if x_axis == "mean_commitment_contribution":
+            x_axis = "commitment_contribution"
         if x_axis in {"pseudotime", "ordering"}:
             x_values = self._selected_display_ordering(output)
             x_label = output.embedding.ordering_key or "Fitted ordering"
         elif x_axis in {"affinity", "directional_affinity"}:
             x_values = output.directional_affinity[:, fate_index]
-            x_label = f"Directional affinity toward {fate}"
+            x_label = metric_label("directional_affinity", fate=fate, scoring_mode=mode)
         elif x_axis in {"contribution", "commitment_contribution"}:
             x_values = output.commitment_contribution[:, fate_index]
-            x_label = f"Commitment contribution toward {fate}"
-        elif x_axis == "specific_commitment":
-            x_values = output.specific_commitment
-            x_label = "Specific commitment"
+            x_label = metric_label(
+                "mean_commitment_contribution", fate=fate, scoring_mode=mode
+            )
+        elif x_axis in {
+            "specific_commitment",
+            "commitment_strength",
+            "directional_specificity",
+            "directional_entropy",
+            "progression_velocity",
+            "unresolved_probability",
+        }:
+            x_values = getattr(output, x_axis)
+            x_label = metric_label(x_axis, scoring_mode=mode)
         else:
             raise ValueError(
                 "x_axis must be 'ordering' (or legacy alias 'pseudotime'), "
@@ -4224,16 +4631,20 @@ class SingleScorer:
 
         rows = np.flatnonzero(selected & np.isfinite(x_values))
         if len(rows) < n_bins:
-            raise ValueError("Too few finite selected cells for the requested number of bins.")
+            raise ValueError(
+                "Too few finite selected cells for the requested number of bins."
+            )
         x_selected = np.asarray(x_values)[rows]
         edges = np.unique(np.quantile(x_selected, np.linspace(0.0, 1.0, n_bins + 1)))
         if len(edges) < 4:
-            raise ValueError("The selected x-axis has too few distinct values for trend plots.")
+            raise ValueError(
+                "The selected x-axis has too few distinct values for trend plots."
+            )
         centers = 0.5 * (edges[:-1] + edges[1:])
         bin_index = np.digitize(x_selected, edges[1:-1], right=False)
 
         matrix = self.adata.layers[layer] if layer is not None else self.adata.X
-        selected_indices = output.embedding.selected_indices[rows]
+        selected_indices = cell_indices(self.adata, output.cell_ids)[rows]
         gene_indices = [int(self.adata.var_names.get_loc(gene)) for gene in genes]
         expression = matrix[selected_indices][:, gene_indices]
         try:
@@ -4268,7 +4679,9 @@ class SingleScorer:
             axis.set_ylabel("Mean expression")
         for axis in axes.ravel()[len(genes) :]:
             axis.set_visible(False)
-        fig.suptitle(f"Expression trends ({population}; reference fate: {fate})", y=0.995)
+        fig.suptitle(
+            f"Expression trends ({population}; reference fate: {fate})", y=0.995
+        )
         fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
         return fig
 
@@ -4341,8 +4754,19 @@ class SingleScorer:
 
     def _check_embedding(self) -> None:
         if self._embedding_result is None:
-            raise RuntimeError("Scientific embedding not built. Call build_embedding() first.")
+            raise RuntimeError(
+                "Scientific embedding not built. Call build_embedding() first."
+            )
+        ids = self._embedding_result.observation_ids
+        if ids is not None and not np.array_equal(observation_ids(self.adata), ids):
+            raise ValueError(
+                "AnnData observation order changed; rebuild the embedding "
+                "or reload the scorer by cell ID."
+            )
 
     def _check_fitted(self) -> None:
         if not self._fitted or self._result is None:
-            raise RuntimeError("Scorer is not fitted. Call build_embedding() and fit() first.")
+            raise RuntimeError(
+                "Scorer is not fitted. Call build_embedding() and fit() first."
+            )
+        self._check_embedding()

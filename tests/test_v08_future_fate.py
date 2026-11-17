@@ -44,7 +44,9 @@ def _embedding() -> tuple[Furcation, ScoringEmbeddingResult]:
     )
     coordinates = np.empty((4, geometry.dimension))
     coordinates[root_mask] = geometry.root_coordinates(root_progress[root_mask])
-    coordinates[terminal_mask] = geometry.terminal_coordinates(terminal_names[terminal_mask])
+    coordinates[terminal_mask] = geometry.terminal_coordinates(
+        terminal_names[terminal_mask]
+    )
     embedding = ScoringEmbeddingResult(
         coordinates=coordinates,
         selected_indices=np.array([0, 1, 2, 3]),
@@ -135,7 +137,9 @@ def test_iterative_and_direct_solvers_agree():
     )
     assert iterative.converged
     assert np.allclose(iterative.probability, direct.probability, atol=1e-10)
-    assert np.allclose(iterative.unresolved_probability, direct.unresolved_probability, atol=1e-10)
+    assert np.allclose(
+        iterative.unresolved_probability, direct.unresolved_probability, atol=1e-10
+    )
 
 
 def test_full_graph_leave_and_return_is_preserved():
@@ -167,7 +171,9 @@ def test_full_graph_leave_and_return_is_preserved():
     assert np.allclose(result.future_fate_affinity[0], [0.5, 0.5])
     assert np.isclose(result.unresolved_probability[0], 1 - gamma**3)
     assert result.one_step_outside_probability[0] == 1.0
-    np.testing.assert_array_equal(result.signed_progression, result.progression_velocity)
+    np.testing.assert_array_equal(
+        result.signed_progression, result.progression_velocity
+    )
     np.testing.assert_array_equal(
         result.selected_path_coverage, result.projection.transition_coverage
     )
@@ -276,7 +282,9 @@ def _fake_transition():
 def test_single_scorer_future_fate_public_workflow():
     from scCS.single import SingleScorer
 
-    scorer = SingleScorer(_fake_adata(), root="Root", branches=["A", "B"], obs_key="cell_type")
+    scorer = SingleScorer(
+        _fake_adata(), root="Root", branches=["A", "B"], obs_key="cell_type"
+    )
     scorer.build_embedding(
         ordering_metric="pseudotime",
         write_to_adata=False,
@@ -297,7 +305,10 @@ def test_single_scorer_future_fate_public_workflow():
     assert scorer.scoring_mode == "future_fate"
     assert result.scoring_mode == "future_fate"
     assert result.future_fate_affinity.shape == (7, 2)
-    assert np.allclose(result.future_fate_affinity.sum(axis=1), 1.0)
+    assert np.allclose(
+        result.future_fate_affinity[result.affinity_defined].sum(axis=1), 1.0
+    )
+    assert np.isnan(result.future_fate_affinity[~result.affinity_defined]).all()
     assert scorer.projected_velocity is None
 
     import matplotlib.pyplot as plt
@@ -346,7 +357,9 @@ def test_pair_scorer_accepts_future_fate_metrics():
         )
     assert set(results) == {"control", "treated"}
     assert all(result.directional_affinity.shape[1] == 2 for result in results.values())
-    assert all(np.isfinite(result.specific_commitment).all() for result in results.values())
+    assert all(
+        np.isfinite(result.specific_commitment).all() for result in results.values()
+    )
 
 
 def test_future_fate_write_to_h5ad_serializes_anchor_diagnostics(tmp_path):
@@ -365,6 +378,7 @@ def test_future_fate_write_to_h5ad_serializes_anchor_diagnostics(tmp_path):
         X=np.zeros((4, 1), dtype=float),
         obs={"cell_type": ["Root", "Root", "A", "B"]},
     )
+    adata.obs_names = embedding.selected_cell_ids
     result.write_to_adata(adata)
     output = tmp_path / "future_fate.h5ad"
     adata.write_h5ad(output)

@@ -1,43 +1,23 @@
 References and software context
 ===============================
 
-scCS is designed to operate on AnnData objects and to complement established
-single-cell analysis and RNA-velocity workflows.
+scCS is designed to work with AnnData, Scanpy, and scVelo objects. RNA velocity,
+latent time, velocity pseudotime, terminal-state estimates, and transition graphs
+remain the responsibility of the source method. scCS adds supervised
+furcation-specific quantification and standardized visualization.
 
-Core software ecosystem
------------------------
+The package decision notebooks document comparisons with transition pushforward,
+scVelo embedding projection, graph refitting on supervised coordinates, local
+trajectory frames, first-exit absorption, and unlimited absorption. These
+notebooks are included as methodological provenance rather than as required user
+workflows.
 
-scCS interoperates with:
+Published foundation and methods
+--------------------------------
 
-- AnnData for annotated matrix storage;
-- Scanpy for preprocessing, neighborhood graphs, dimensionality reduction,
-  clustering, and visualization;
-- scVelo for RNA-velocity estimation, velocity graphs, latent time, and
-  velocity pseudotime;
-- RegVelo datasets and models where available;
-- SciPy, NumPy, pandas, statsmodels, and related scientific Python tools.
-
-Scientific scope
-----------------
-
-RNA velocity, latent time, velocity pseudotime, source transition graphs, and
-terminal-state evidence remain responsibilities of the corresponding upstream
-methods. scCS adds supervised furcation-specific quantification, condition
-comparison, interpretation, downstream analysis, and standardized
-visualization.
-
-Methodological context
-----------------------
-
-The methodological tutorials compare DFFP with immediate transition
-pushforward, scVelo embedding projection, graph refitting on supervised
-coordinates, local trajectory-frame projection, first-exit absorption, and
-unlimited absorption. These comparisons explain the final method choice and
-are not required steps in routine user analyses.
-
-For the equations, assumptions, and interpretation of scCS outputs, see:
-
-- :doc:`mathematical_framework`
-- :doc:`metrics`
-- :doc:`method_selection`
-- :doc:`limitations`
+Kriukov et al. (2026), *Single-cell transcriptomics reveals reversible
+microglia/macrophage activation after human retinal neuron transplantation into
+mouse retina*, iScience, DOI: https://doi.org/10.1016/j.isci.2026.117232.
+The redesigned methods are described separately in the methods preprint:
+https://doi.org/10.64898/2026.07.27.741070. Cite the exact software version and
+scientific settings alongside the relevant work.

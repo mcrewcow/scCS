@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional, Sequence, Union
 
 import numpy as np
 
+from ._alignment import cell_indices
 from ._version import VERSION
 from .affinity import (
     CommitmentAffinityResult,
@@ -124,7 +125,9 @@ class FurcationScoreResult:
         ``NaN`` because an angle is not defined without a direction.
         """
         vectors = np.asarray(self.branch_velocity, dtype=float)
-        directions = np.asarray(self.embedding.geometry.terminal_directions, dtype=float)
+        directions = np.asarray(
+            self.embedding.geometry.terminal_directions, dtype=float
+        )
         output = np.full((len(vectors), len(directions)), np.nan, dtype=float)
         finite = np.all(np.isfinite(vectors), axis=1)
         magnitudes = np.linalg.norm(np.nan_to_num(vectors, nan=0.0), axis=1)
@@ -151,7 +154,9 @@ class FurcationScoreResult:
     def specific_commitment(self) -> np.ndarray:
         return self.commitment.specific_commitment
 
-    def summarize(self, mask: Optional[np.ndarray] = None) -> PopulationCommitmentSummary:
+    def summarize(
+        self, mask: Optional[np.ndarray] = None
+    ) -> PopulationCommitmentSummary:
         """Summarize commitment over an explicit selected-cell mask.
 
         If no mask is supplied, the manually annotated root population is
@@ -160,8 +165,14 @@ class FurcationScoreResult:
         if mask is None:
             mask = self.root_mask
         values = np.asarray(mask)
-        if values.dtype != bool or values.ndim != 1 or len(values) != len(self.cell_ids):
-            raise ValueError("mask must be a Boolean array aligned to selected furcation cells.")
+        if (
+            values.dtype != bool
+            or values.ndim != 1
+            or len(values) != len(self.cell_ids)
+        ):
+            raise ValueError(
+                "mask must be a Boolean array aligned to selected furcation cells."
+            )
         if not values.any():
             raise ValueError("Cannot summarize an empty population.")
         return summarize_commitment(self.commitment.commitment_contribution[values])
@@ -172,14 +183,22 @@ class FurcationScoreResult:
         valid = self.projection.velocity_defined
         valid_root = root & valid
         statuses, counts = np.unique(self.status[root], return_counts=True)
-        status_text = ", ".join(f"{name}={count}" for name, count in zip(statuses, counts))
+        status_text = ", ".join(
+            f"{name}={count}" for name, count in zip(statuses, counts)
+        )
         if valid_root.any():
             mean_strength = float(np.mean(self.commitment_strength[valid_root]))
             mean_entropy = float(np.mean(self.directional_entropy[valid_root]))
-            mean_commitment_entropy = float(np.mean(self.commitment_entropy[valid_root]))
+            mean_commitment_entropy = float(
+                np.mean(self.commitment_entropy[valid_root])
+            )
             mean_specificity = float(np.mean(self.directional_specificity[valid_root]))
-            mean_specific_commitment = float(np.mean(self.specific_commitment[valid_root]))
-            median_coverage = float(np.median(self.projection.transition_coverage[valid_root]))
+            mean_specific_commitment = float(
+                np.mean(self.specific_commitment[valid_root])
+            )
+            median_coverage = float(
+                np.median(self.projection.transition_coverage[valid_root])
+            )
         else:
             mean_strength = float("nan")
             mean_entropy = float("nan")
@@ -191,7 +210,8 @@ class FurcationScoreResult:
         composition = self.root_population_summary.commitment_composition
         if self.root_population_summary.composition_defined:
             composition_text = ", ".join(
-                f"{fate}={value:.3f}" for fate, value in zip(self.fate_names, composition)
+                f"{fate}={value:.3f}"
+                for fate, value in zip(self.fate_names, composition)
             )
         else:
             composition_text = "undefined (zero commitment mass)"
@@ -217,10 +237,11 @@ class FurcationScoreResult:
         adata,
         *,
         metadata_key: str = "sccs",
+        compact_metadata: bool = False,
     ) -> None:
         """Write v0.8 outputs to full-length AnnData containers."""
         n_obs = adata.n_obs
-        selected = self.embedding.selected_indices
+        selected = cell_indices(adata, self.cell_ids)
         k = len(self.fate_names)
         dimension = self.embedding.dimension
 
@@ -234,28 +255,52 @@ class FurcationScoreResult:
             result[selected] = values
             return result
 
-        self.embedding.write_to_adata(adata, metadata_key=metadata_key)
-        adata.obsm["sccs_projected_velocity"] = full_matrix(self.projected_velocity, dimension)
-        adata.obsm["sccs_branch_velocity"] = full_matrix(self.branch_velocity, dimension)
+        self.embedding.write_to_adata(
+            adata, metadata_key=metadata_key, compact_metadata=compact_metadata
+        )
+        adata.obsm["sccs_projected_velocity"] = full_matrix(
+            self.projected_velocity, dimension
+        )
+        adata.obsm["sccs_branch_velocity"] = full_matrix(
+            self.branch_velocity, dimension
+        )
         adata.obsm["sccs_directional_affinity"] = full_matrix(
             self.commitment.directional_affinity, k
         )
-        adata.obsm["sccs_commitment_affinity"] = full_matrix(self.commitment.commitment_affinity, k)
+        adata.obsm["sccs_commitment_affinity"] = full_matrix(
+            self.commitment.commitment_affinity, k
+        )
         adata.obsm["sccs_commitment_contribution"] = full_matrix(
             self.commitment.commitment_contribution, k
         )
-        adata.obsm["sccs_fate_cosine_similarity"] = full_matrix(self.fate_cosine_similarity, k)
+        adata.obsm["sccs_fate_cosine_similarity"] = full_matrix(
+            self.fate_cosine_similarity, k
+        )
         adata.obs["sccs_progression_velocity"] = full_vector(self.progression_velocity)
-        adata.obs["sccs_branch_magnitude"] = full_vector(self.commitment.velocity_magnitude)
-        adata.obs["sccs_commitment_strength"] = full_vector(self.commitment.commitment_strength)
-        adata.obs["sccs_directional_entropy"] = full_vector(self.commitment.directional_entropy)
-        adata.obs["sccs_commitment_entropy"] = full_vector(self.commitment.commitment_entropy)
-        adata.obs["sccs_nearest_fate_angle_degrees"] = full_vector(self.nearest_fate_angle_degrees)
+        adata.obs["sccs_branch_magnitude"] = full_vector(
+            self.commitment.velocity_magnitude
+        )
+        adata.obs["sccs_commitment_strength"] = full_vector(
+            self.commitment.commitment_strength
+        )
+        adata.obs["sccs_directional_entropy"] = full_vector(
+            self.commitment.directional_entropy
+        )
+        adata.obs["sccs_commitment_entropy"] = full_vector(
+            self.commitment.commitment_entropy
+        )
+        adata.obs["sccs_nearest_fate_angle_degrees"] = full_vector(
+            self.nearest_fate_angle_degrees
+        )
         adata.obs["sccs_directional_specificity"] = full_vector(
             self.commitment.directional_specificity
         )
-        adata.obs["sccs_specific_commitment"] = full_vector(self.commitment.specific_commitment)
-        adata.obs["sccs_transition_coverage"] = full_vector(self.projection.transition_coverage)
+        adata.obs["sccs_specific_commitment"] = full_vector(
+            self.commitment.specific_commitment
+        )
+        adata.obs["sccs_transition_coverage"] = full_vector(
+            self.projection.transition_coverage
+        )
         adata.obs["sccs_external_transition_mass"] = full_vector(
             self.projection.external_transition_mass
         )
@@ -279,7 +324,9 @@ class FurcationScoreResult:
         metadata["projection"] = {
             "renormalized_retained": bool(self.projection.renormalized),
             "min_coverage": float(self.projection.min_coverage),
-            "mean_transition_coverage": float(np.nanmean(self.projection.transition_coverage)),
+            "mean_transition_coverage": float(
+                np.nanmean(self.projection.transition_coverage)
+            ),
             "undefined_fraction": float(np.mean(~self.projection.velocity_defined)),
         }
         metadata["affinity_model"] = "calibrated_cosine_softmax"
@@ -287,14 +334,18 @@ class FurcationScoreResult:
         metadata["entropy"] = {
             "directional_entropy": "normalized_shannon_of_directional_affinity",
             "commitment_entropy": "normalized_shannon_of_strength_blended_affinity",
-            "aligned_directional_entropy_floor": float(self.aligned_directional_entropy),
+            "aligned_directional_entropy_floor": float(
+                self.aligned_directional_entropy
+            ),
             "directional_specificity": (
                 "support_adjusted_(1-H)/(1-H_aligned); uniform=0; aligned=1"
             ),
         }
         metadata["magnitude_fit_population"] = self.magnitude_fit_population
         metadata["root_population_summary"] = {
-            "total_commitment_mass": (self.root_population_summary.total_commitment_mass.tolist()),
+            "total_commitment_mass": (
+                self.root_population_summary.total_commitment_mass.tolist()
+            ),
             "mean_commitment_contribution": (
                 self.root_population_summary.mean_commitment_contribution.tolist()
             ),
@@ -304,7 +355,9 @@ class FurcationScoreResult:
             "pairwise_log_commitment_ratio": (
                 self.root_population_summary.pairwise_log_commitment_ratio.tolist()
             ),
-            "population_balance_entropy": (self.root_population_summary.population_balance_entropy),
+            "population_balance_entropy": (
+                self.root_population_summary.population_balance_entropy
+            ),
             "n_cells": self.root_population_summary.n_cells,
             "total_mass": self.root_population_summary.total_mass,
             "composition_defined": (self.root_population_summary.composition_defined),
@@ -330,7 +383,9 @@ def _score_status(
     committed_specificity_threshold: float,
 ) -> np.ndarray:
     status = np.full(len(branch_magnitude), "uncommitted", dtype=object)
-    total_outgoing = projection.retained_transition_mass + projection.external_transition_mass
+    total_outgoing = (
+        projection.retained_transition_mass + projection.external_transition_mass
+    )
     no_outgoing = total_outgoing <= np.finfo(float).eps
     low_coverage = (~projection.velocity_defined) & (~no_outgoing)
     status[no_outgoing] = "no_projected_velocity"
@@ -370,7 +425,9 @@ def score_projected_furcation(
         raise ValueError("projection and embedding contain different cell counts.")
 
     safe_velocity = np.zeros_like(projection.velocity)
-    safe_velocity[projection.velocity_defined] = projection.velocity[projection.velocity_defined]
+    safe_velocity[projection.velocity_defined] = projection.velocity[
+        projection.velocity_defined
+    ]
     progression, safe_branch = embedding.geometry.decompose_velocity(safe_velocity)
 
     # Reuse the immutable projection payload instead of keeping a second
@@ -397,7 +454,9 @@ def score_projected_furcation(
     if magnitude_fit_population == "root":
         fit_mask &= embedding.root_mask
     if not fit_mask.any():
-        raise ValueError("No valid projected velocities are available to fit magnitude strength.")
+        raise ValueError(
+            "No valid projected velocities are available to fit magnitude strength."
+        )
     scaler.fit(branch_magnitude[fit_mask])
     strength = np.zeros(len(branch_magnitude), dtype=float)
     strength[projection.velocity_defined] = scaler.transform(
@@ -425,10 +484,14 @@ def score_projected_furcation(
         commitment.directional_affinity,
         axis=1,
     )
-    dominant_fate = np.asarray(embedding.geometry.fate_names, dtype=object)[dominant_indices]
+    dominant_fate = np.asarray(embedding.geometry.fate_names, dtype=object)[
+        dominant_indices
+    ]
     dominant_fate[status != "fate_committed"] = ""
 
-    root_summary = summarize_commitment(commitment.commitment_contribution[embedding.root_mask])
+    root_summary = summarize_commitment(
+        commitment.commitment_contribution[embedding.root_mask]
+    )
 
     return FurcationScoreResult(
         furcation=furcation,

@@ -1,8 +1,15 @@
-include LICENSE README.md pyproject.toml CITATION.cff .readthedocs.yaml
-recursive-include docs *.rst *.py *.ipynb
-recursive-include tutorials *.ipynb
+include LICENSE README.md pyproject.toml CITATION.cff
+include INSTALL_CONDA.md RELEASE_NOTES_0.8.1rc2.md RELEASE_VALIDATION.md UPLOAD_GITHUB.md
+include constraints-tutorials.txt environment-tutorials.yml TUTORIAL_SUITE_GUIDE.md
 recursive-include tests *.py
-recursive-include benchmarks *.py
+recursive-include benchmarks *.py *.slurm
 recursive-include scCS py.typed
-
-prune docs/_build
+prune docs
+prune tutorials
+prune release_checks
+prune validation_history
+prune data
+prune tutorial_outputs
+global-exclude *-checkpoint.ipynb
+global-exclude *.py[cod]
+global-exclude .DS_Store

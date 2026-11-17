@@ -11,8 +11,6 @@ import pandas as pd
 from .condition import (
     ConditionCommitmentResult,
     ConditionScorer,
-    _canonical_metric,
-    _metric_label,
 )
 from .inference import (
     holm_adjust,
@@ -20,6 +18,7 @@ from .inference import (
     two_group_permutation_test,
 )
 from .mixed_models import fit_mixedlm_fail_closed
+from ._replicates import prepare_replicates, adjust_inference
 
 
 class MultiScorer(ConditionScorer):
@@ -38,19 +37,25 @@ class MultiScorer(ConditionScorer):
         n_permutations: int = 9999,
         random_state: int = 0,
         adjust_pvalues: bool = True,
+        undefined_replicates: str = "raise",
         verbose: bool = True,
     ) -> pd.DataFrame:
         """Replicate-label permutation omnibus test across all conditions."""
         chosen = self._resolve_results(results)
         metric_public = str(metric)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if self.replicate_obs_key is None:
             raise ValueError("compare_omnibus requires replicate_obs_key.")
         table = self.replicate_table(chosen)
         rows = []
         specs = self._outcome_specs(metric, fate=fate, fate_pair=fate_pair)
         for offset, (fate_name, pair, column) in enumerate(specs):
-            subset = table[["condition", column]].dropna()
+            subset, audit = prepare_replicates(
+                table,
+                column,
+                self.conditions,
+                undefined_replicates=undefined_replicates,
+            )
             test = one_way_permutation_test(
                 subset[column].to_numpy(dtype=float),
                 subset["condition"].to_numpy(str),
@@ -58,14 +63,17 @@ class MultiScorer(ConditionScorer):
                 random_state=random_state + offset,
             )
             means = {
-                condition: float(subset.loc[subset["condition"] == condition, column].mean())
+                condition: float(
+                    subset.loc[subset["condition"] == condition, column].mean()
+                )
                 for condition in self.conditions
             }
             rows.append(
                 {
+                    **audit,
                     "metric": metric,
                     "metric_public": metric_public,
-                    "metric_label": _metric_label(metric_public, fate=fate_name),
+                    "metric_label": self._metric_label(metric_public, fate=fate_name),
                     "fate": fate_name,
                     "fate_a": None if pair is None else pair[0],
                     "fate_b": None if pair is None else pair[1],
@@ -78,10 +86,8 @@ class MultiScorer(ConditionScorer):
                 }
             )
         output = pd.DataFrame(rows)
-        output["pvalue_adj"] = (
-            holm_adjust(output["pvalue"].to_numpy())
-            if adjust_pvalues and len(output) > 1
-            else output["pvalue"].to_numpy()
+        output = adjust_inference(
+            output, table, specs, metric, self.branches, adjust=adjust_pvalues
         )
         if verbose:
             print(f"[scCS] Multi-condition replicate omnibus test; metric={metric!r}.")
@@ -101,11 +107,13 @@ class MultiScorer(ConditionScorer):
         max_exact: int = 100_000,
         random_state: int = 0,
         verbose: bool = True,
+        undefined_replicates: str = "raise",
+        alpha: float = 0.05,
     ) -> pd.DataFrame:
         """Pairwise replicate-label tests with Holm correction."""
         chosen = self._resolve_results(results)
         metric_public = str(metric)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if self.replicate_obs_key is None:
             raise ValueError("compare_posthoc requires replicate_obs_key.")
         specs = self._outcome_specs(metric, fate=fate, fate_pair=fate_pair)
@@ -147,10 +155,12 @@ class MultiScorer(ConditionScorer):
         counter = 0
         for fate_name, pair, column in specs:
             for condition_a, condition_b in combinations(self.conditions, 2):
-                subset = table.loc[
-                    table["condition"].isin([condition_a, condition_b]),
-                    ["condition", column],
-                ].dropna()
+                subset, audit = prepare_replicates(
+                    table,
+                    column,
+                    [condition_a, condition_b],
+                    undefined_replicates=undefined_replicates,
+                )
                 test = two_group_permutation_test(
                     subset[column].to_numpy(dtype=float),
                     subset["condition"].to_numpy(str),
@@ -159,13 +169,18 @@ class MultiScorer(ConditionScorer):
                     n_permutations=n_permutations,
                     max_exact=max_exact,
                     random_state=random_state + counter,
+                    alpha=alpha,
                 )
                 counter += 1
                 rows.append(
                     {
+                        **audit,
+                        "minimum_attainable_pvalue": test.minimum_attainable_pvalue,
                         "metric": metric,
                         "metric_public": metric_public,
-                        "metric_label": _metric_label(metric_public, fate=fate_name),
+                        "metric_label": self._metric_label(
+                            metric_public, fate=fate_name
+                        ),
                         "fate": fate_name,
                         "fate_a": None if pair is None else pair[0],
                         "fate_b": None if pair is None else pair[1],
@@ -180,9 +195,11 @@ class MultiScorer(ConditionScorer):
                     }
                 )
         output = pd.DataFrame(rows)
-        output["pvalue_adj"] = holm_adjust(output["pvalue"].to_numpy())
+        output = adjust_inference(output, table, specs, metric, self.branches)
         if verbose:
-            print(f"[scCS] Multi-condition post-hoc replicate tests; metric={metric!r}.")
+            print(
+                f"[scCS] Multi-condition post-hoc replicate tests; metric={metric!r}."
+            )
         return output
 
     def compare_contrast(
@@ -195,11 +212,12 @@ class MultiScorer(ConditionScorer):
         fate_pair: Optional[tuple[str, str]] = None,
         n_permutations: int = 9999,
         random_state: int = 0,
+        undefined_replicates: str = "raise",
     ) -> pd.DataFrame:
         """Test a planned zero-sum contrast on replicate-level outcomes."""
         chosen = self._resolve_results(results)
         metric_public = str(metric)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if self.replicate_obs_key is None:
             raise ValueError("compare_contrast requires replicate_obs_key.")
         normalized = {str(key): float(value) for key, value in weights.items()}
@@ -211,12 +229,18 @@ class MultiScorer(ConditionScorer):
             raise ValueError("n_permutations must be positive.")
 
         table = self.replicate_table(chosen)
-        labels = table["condition"].to_numpy(str)
         rng = np.random.default_rng(random_state)
         rows = []
         specs = self._outcome_specs(metric, fate=fate, fate_pair=fate_pair)
         for fate_name, pair, column in specs:
-            values = table[column].to_numpy(dtype=float)
+            subset, audit = prepare_replicates(
+                table,
+                column,
+                self.conditions,
+                undefined_replicates=undefined_replicates,
+            )
+            labels = subset["condition"].to_numpy(str)
+            values = subset[column].to_numpy(dtype=float)
 
             def statistic(group_labels: np.ndarray) -> float:
                 return float(
@@ -234,9 +258,10 @@ class MultiScorer(ConditionScorer):
             pvalue = (exceed + 1) / (n_permutations + 1)
             rows.append(
                 {
+                    **audit,
                     "metric": metric,
                     "metric_public": metric_public,
-                    "metric_label": _metric_label(metric_public, fate=fate_name),
+                    "metric_label": self._metric_label(metric_public, fate=fate_name),
                     "fate": fate_name,
                     "fate_a": None if pair is None else pair[0],
                     "fate_b": None if pair is None else pair[1],
@@ -247,9 +272,7 @@ class MultiScorer(ConditionScorer):
                 }
             )
         output = pd.DataFrame(rows)
-        output["pvalue_adj"] = (
-            holm_adjust(output["pvalue"].to_numpy()) if len(output) > 1 else output["pvalue"]
-        )
+        output = adjust_inference(output, table, specs, metric, self.branches)
         return output
 
     def fit_mixed_model(
@@ -259,6 +282,7 @@ class MultiScorer(ConditionScorer):
         fate: Optional[str] = None,
         results: Optional[Mapping[str, ConditionCommitmentResult]] = None,
         on_invalid: str = "return",
+        undefined_replicates: str = "raise",
     ) -> pd.DataFrame:
         """Fit optional mixed models with fail-closed omnibus Wald tests.
 
@@ -276,7 +300,7 @@ class MultiScorer(ConditionScorer):
             ) from exc
 
         chosen = self._resolve_results(results)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if self.replicate_obs_key is None:
             raise ValueError("fit_mixed_model requires replicate_obs_key.")
         specs = self._outcome_specs(metric, fate=fate)
@@ -284,7 +308,13 @@ class MultiScorer(ConditionScorer):
         reference = self.conditions[0]
         alternatives = self.conditions[1:]
 
-        for fate_name, _, _ in specs:
+        for fate_name, _, column in specs:
+            eligible, eligibility_audit = prepare_replicates(
+                self.replicate_table(chosen),
+                column,
+                self.conditions,
+                undefined_replicates=undefined_replicates,
+            )
             values = []
             groups = []
             condition_values = []
@@ -317,10 +347,18 @@ class MultiScorer(ConditionScorer):
                         "fit_mixed_model does not support this metric. Use a scalar "
                         "cell-level outcome or one fate-specific affinity/contribution."
                     )
-                finite = np.isfinite(cell_values)
+                included_ids = eligible.loc[
+                    eligible.condition == condition, "replicate_id"
+                ]
+                finite = np.isfinite(cell_values) & np.isin(
+                    result.replicate_ids, included_ids
+                )
                 values.extend(cell_values[finite].tolist())
                 groups.extend(
-                    [f"{condition}::{replicate}" for replicate in result.replicate_ids[finite]]
+                    [
+                        f"{condition}::{replicate}"
+                        for replicate in result.replicate_ids[finite]
+                    ]
                 )
                 condition_values.extend([condition] * int(finite.sum()))
 
@@ -341,6 +379,7 @@ class MultiScorer(ConditionScorer):
             )
 
             common = {
+                **eligibility_audit,
                 "metric": metric,
                 "fate": fate_name,
                 "reference_condition": reference,
@@ -356,13 +395,17 @@ class MultiScorer(ConditionScorer):
                     audit.fixed_effect_covariance_condition_number
                 ),
                 "random_effect_variance_min": audit.random_effect_variance_min,
-                "converged": bool(audit.fit is not None and getattr(audit.fit, "converged", False)),
+                "converged": bool(
+                    audit.fit is not None and getattr(audit.fit, "converged", False)
+                ),
             }
             if not audit.valid:
                 rows.append(
                     {
                         **common,
-                        "condition_coefficients": {condition: np.nan for condition in alternatives},
+                        "condition_coefficients": {
+                            condition: np.nan for condition in alternatives
+                        },
                         "wald_chi2": np.nan,
                         "df": len(alternatives),
                         "pvalue": np.nan,
@@ -384,7 +427,8 @@ class MultiScorer(ConditionScorer):
                 {
                     **common,
                     "condition_coefficients": {
-                        condition: float(value) for condition, value in zip(alternatives, beta)
+                        condition: float(value)
+                        for condition, value in zip(alternatives, beta)
                     },
                     "wald_chi2": statistic,
                     "df": df,
@@ -423,7 +467,9 @@ class MultiScorer(ConditionScorer):
         required = {"condition_means", "metric"}
         missing = sorted(required - set(omnibus_results.columns))
         if missing:
-            raise ValueError("plot_omnibus_summary is missing columns: " + ", ".join(missing))
+            raise ValueError(
+                "plot_omnibus_summary is missing columns: " + ", ".join(missing)
+            )
         frame = omnibus_results.reset_index(drop=True)
         row_labels = []
         rows = []
@@ -436,10 +482,12 @@ class MultiScorer(ConditionScorer):
             elif fate_a is not None and fate_b is not None:
                 label = f"{fate_a} / {fate_b}"
             else:
-                label = _metric_label(str(row.metric))
+                label = self._metric_label(str(row.metric))
             means = dict(row.condition_means)
             row_labels.append(label)
-            rows.append([float(means.get(condition, np.nan)) for condition in self.conditions])
+            rows.append(
+                [float(means.get(condition, np.nan)) for condition in self.conditions]
+            )
         matrix = np.asarray(rows, dtype=float)
 
         import matplotlib.pyplot as plt
@@ -453,12 +501,14 @@ class MultiScorer(ConditionScorer):
         ax.set_yticks(np.arange(len(row_labels)))
         ax.set_yticklabels(row_labels)
         metric = str(frame["metric"].iloc[0])
-        ax.set_title(f"Omnibus summary: {_metric_label(metric)}")
-        ax.figure.colorbar(image, ax=ax, label=_metric_label(metric))
+        ax.set_title(f"Omnibus summary: {self._metric_label(metric)}")
+        ax.figure.colorbar(image, ax=ax, label=self._metric_label(metric))
 
         if annotate and matrix.size <= 150:
             pvalue_column = (
-                "pvalue_adj" if use_adjusted_pvalue and "pvalue_adj" in frame.columns else "pvalue"
+                "pvalue_adj"
+                if use_adjusted_pvalue and "pvalue_adj" in frame.columns
+                else "pvalue"
             )
             for row_index in range(matrix.shape[0]):
                 pvalue = (
@@ -490,7 +540,9 @@ class MultiScorer(ConditionScorer):
         required = {"condition_a", "condition_b", "effect_b_minus_a"}
         missing = sorted(required - set(posthoc_results.columns))
         if missing:
-            raise ValueError("plot_posthoc_heatmap is missing columns: " + ", ".join(missing))
+            raise ValueError(
+                "plot_posthoc_heatmap is missing columns: " + ", ".join(missing)
+            )
         frame = posthoc_results.copy()
         if "fate" in frame.columns:
             available = [str(value) for value in pd.unique(frame["fate"].dropna())]
@@ -518,14 +570,21 @@ class MultiScorer(ConditionScorer):
         pvalues = np.full((size, size), np.nan, dtype=float)
         np.fill_diagonal(effects, 0.0)
         np.fill_diagonal(pvalues, 1.0)
-        condition_to_index = {condition: index for index, condition in enumerate(self.conditions)}
+        condition_to_index = {
+            condition: index for index, condition in enumerate(self.conditions)
+        }
         pvalue_column = (
-            "pvalue_adj" if use_adjusted_pvalue and "pvalue_adj" in frame.columns else "pvalue"
+            "pvalue_adj"
+            if use_adjusted_pvalue and "pvalue_adj" in frame.columns
+            else "pvalue"
         )
         for row in frame.itertuples(index=False):
             condition_a = str(row.condition_a)
             condition_b = str(row.condition_b)
-            if condition_a not in condition_to_index or condition_b not in condition_to_index:
+            if (
+                condition_a not in condition_to_index
+                or condition_b not in condition_to_index
+            ):
                 continue
             index_a = condition_to_index[condition_a]
             index_b = condition_to_index[condition_b]

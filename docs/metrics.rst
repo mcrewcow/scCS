@@ -92,3 +92,30 @@ The established result properties remain available. In future-fate mode:
      - Signed Ordering Flux
    * - ``transition_coverage``
      - one-step selected-path coverage
+
+Undefined conditional quantities
+----------------------------------
+
+Below ``min_reach``, CFA, future-fate entropy and FFS are undefined (NaN).
+Conditional summaries exclude those cells; per-replicate counts and the fraction
+with defined affinity are reported separately. RC is conservatively zero while
+discounted fate contributions retain their actual probabilities. Interpret
+conditional preference with DFR, UFP and defined-affinity coverage; missing CFA
+is not a uniform preference. Gene associations use only cells with the target
+outcome defined and enforce the minimum cell count for each replicate.
+
+Ordering ranks use average ranks for ties. Thus permuting cells tied at the
+same ordering cannot create SOF. SOF remains conditional on transitions retained
+within the selected furcation. DFFP horizons count discounted graph steps, not
+physical elapsed time, and these associations alone do not prove irreversible
+biological commitment.
+
+Instantaneous mode remains the default for backward compatibility. In two-fate
+instantaneous geometry, cosine affinity measures the sign of a collinear
+displacement and cannot distinguish mixture strength along that ray. The
+biological tutorials explicitly choose future-fate mode.
+
+Export and reload validate unique cell IDs. New saves retain the full graph
+axis and can be loaded against a reordered copy of the same full cell set.
+Reordering the scorer's live AnnData requires reload or rebuilding. Partial
+legacy saves lacking the full cell axis must be rebuilt.

@@ -1,0 +1,14 @@
+level,code,message,value
+info,furcation_valid,Root and terminal annotations are valid.,2518.0
+info,root_cells,Root population contains 1234 cells.,1234.0
+info,terminal_Alpha,Terminal 'Alpha' contains 481 cells.,481.0
+info,terminal_Beta,Terminal 'Beta' contains 591 cells.,591.0
+info,terminal_Delta,Terminal 'Delta' contains 70 cells.,70.0
+info,terminal_Epsilon,Terminal 'Epsilon' contains 142 cells.,142.0
+info,ordering_valid,Ordering metric is finite and non-constant among selected furcation cells.,1.0
+info,ordering_resolution,Root ordering has 1234 unique values across 1234 cells.,1.0
+info,velocity_available,Velocity information is available.,
+info,graph_dead_end_nonanchors,0 selected non-anchor cells have no positive off-diagonal transition.,0.0
+info,root_unreachable_selected_anchors,0 root cells have no graph path to selected anchors without crossing another outcome anchor. This is distinct from low discounted reach and can reflect graph/model limitations.,0.0
+info,transition_coverage,"Root transition coverage median=1.000, q05=0.986.",0.9859647712502221
+info,undefined_affinity,Undefined root conditional-affinity fraction=0.000.,0.0

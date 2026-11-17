@@ -43,9 +43,13 @@ def calibrated_softmax_beta(k: int, aligned_probability: float) -> float:
         raise ValueError("k must be an integer greater than or equal to 2.")
     lower = 1.0 / k
     if not lower < aligned_probability < 1.0:
-        raise ValueError(f"aligned_probability must lie strictly between {lower} and 1.")
+        raise ValueError(
+            f"aligned_probability must lie strictly between {lower} and 1."
+        )
     return float(
-        (k - 1.0) / k * np.log((k - 1.0) * aligned_probability / (1.0 - aligned_probability))
+        (k - 1.0)
+        / k
+        * np.log((k - 1.0) * aligned_probability / (1.0 - aligned_probability))
     )
 
 
@@ -93,7 +97,9 @@ def _validate_vectors_and_directions(
     v = np.asarray(vectors, dtype=float)
     d = np.asarray(directions, dtype=float)
     if v.ndim != 2 or d.ndim != 2 or v.shape[1] != d.shape[1]:
-        raise ValueError("vectors and directions must be two-dimensional with matching dimensions.")
+        raise ValueError(
+            "vectors and directions must be two-dimensional with matching dimensions."
+        )
     if d.shape[0] < 2:
         raise ValueError("At least two fate directions are required.")
     if not np.all(np.isfinite(v)) or not np.all(np.isfinite(d)):
@@ -123,7 +129,9 @@ def cosine_softmax_affinity(
     neutral mathematical value only; no-signal status is carried separately in
     :class:`CommitmentAffinityResult` and the scorer result.
     """
-    v_unit, d_unit, defined = _validate_vectors_and_directions(branch_velocity, fate_directions)
+    v_unit, d_unit, defined = _validate_vectors_and_directions(
+        branch_velocity, fate_directions
+    )
     k = d_unit.shape[0]
     beta = calibrated_softmax_beta(k, aligned_probability)
     logits = beta * (v_unit @ d_unit.T)

@@ -1,0 +1,9 @@
+name: sccs-081rc2
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - "-c constraints-tutorials.txt"
+      - "-e .[tutorials]"

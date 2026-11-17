@@ -60,7 +60,9 @@ def test_root_and_terminal_coordinates_obey_simplex_axes_and_fixed_radius():
         result.arm_scale,
         atol=1e-12,
     )
-    for coordinate, name in zip(terminal_coords, result.terminal_names[result.terminal_mask]):
+    for coordinate, name in zip(
+        terminal_coords, result.terminal_names[result.terminal_mask]
+    ):
         np.testing.assert_allclose(
             coordinate,
             result.arm_scale * result.geometry.direction_for(name),

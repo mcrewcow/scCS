@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import deque
 
 import numpy as np
 import pandas as pd
+from ._alignment import observation_ids
 
 
 @dataclass(frozen=True)
@@ -44,7 +46,12 @@ class PreflightReport:
     def to_frame(self) -> pd.DataFrame:
         return pd.DataFrame(
             [
-                {"level": d.level, "code": d.code, "message": d.message, "value": d.value}
+                {
+                    "level": d.level,
+                    "code": d.code,
+                    "message": d.message,
+                    "value": d.value,
+                }
                 for d in self.diagnostics
             ]
         )
@@ -55,7 +62,9 @@ class PreflightReport:
             f"  errors={len(self.errors)}, warnings={len(self.warnings)}, info={len(self.info)}",
         ]
         for diagnostic in self.diagnostics:
-            lines.append(f"  [{diagnostic.level.upper()}] {diagnostic.code}: {diagnostic.message}")
+            lines.append(
+                f"  [{diagnostic.level.upper()}] {diagnostic.code}: {diagnostic.message}"
+            )
         return "\n".join(lines)
 
     def display(self):
@@ -68,8 +77,73 @@ class PreflightReport:
         return self
 
 
-def _append(items: list[PreflightDiagnostic], code: str, level: str, message: str, value=None):
-    items.append(PreflightDiagnostic(code=code, level=level, message=message, value=value))
+def _append(
+    items: list[PreflightDiagnostic], code: str, level: str, message: str, value=None
+):
+    items.append(
+        PreflightDiagnostic(code=code, level=level, message=message, value=value)
+    )
+
+
+def _graph_diagnostics(scorer, result, diagnostics):
+    """Count graph dead ends separately from graph reachability and score reach."""
+    matrix = getattr(scorer, "_transition_matrix", None)
+    if matrix is None:
+        return
+    from scipy import sparse
+    from ._alignment import cell_indices
+
+    graph = sparse.csr_matrix(matrix, dtype=float, copy=True)
+    graph.data[graph.data <= 0] = 0
+    graph.eliminate_zeros()
+    selected = cell_indices(scorer.adata, result.cell_ids)
+    graph.setdiag(0)
+    graph.eliminate_zeros()
+    dead = np.diff(graph.indptr) == 0
+    anchors = getattr(result, "outcome_anchor_mask", None)
+    if anchors is None:
+        n = int(dead[selected[result.root_mask]].sum())
+        _append(
+            diagnostics,
+            "root_graph_dead_ends",
+            "warning" if n else "info",
+            f"{n} root cells have no positive off-diagonal graph transition.",
+            n,
+        )
+        return
+    anchor_any = np.asarray(anchors).any(axis=1)
+    dead_nonanchor = dead & ~anchor_any
+    n = int(dead_nonanchor[selected].sum())
+    _append(
+        diagnostics,
+        "graph_dead_end_nonanchors",
+        "warning" if n else "info",
+        f"{n} selected non-anchor cells have no positive off-diagonal transition.",
+        n,
+    )
+    reverse = graph.transpose().tocsr()
+    # All outcome anchors are absorbing in the scientific solver. Reachability
+    # to selected anchors must not traverse a competing anchor.
+    selected_anchor = np.zeros(graph.shape[0], dtype=bool)
+    selected_anchor[selected] = np.asarray(result.selected_anchor_mask).any(axis=1)
+    reachable = selected_anchor.copy()
+    queue = deque(np.flatnonzero(selected_anchor).tolist())
+    while queue:
+        node = queue.popleft()
+        predecessors = reverse.indices[reverse.indptr[node] : reverse.indptr[node + 1]]
+        new = predecessors[~reachable[predecessors] & ~anchor_any[predecessors]]
+        reachable[new] = True
+        queue.extend(new.tolist())
+    n = int((~reachable[selected[result.root_mask]]).sum())
+    _append(
+        diagnostics,
+        "root_unreachable_selected_anchors",
+        "warning" if n else "info",
+        f"{n} root cells have no graph path to selected anchors "
+        "without crossing another outcome anchor. "
+        "This is distinct from low discounted reach and can reflect graph/model limitations.",
+        n,
+    )
 
 
 def single_preflight(
@@ -78,6 +152,9 @@ def single_preflight(
     diagnostics: list[PreflightDiagnostic] = []
     adata = scorer.adata
     try:
+        observation_ids(adata)
+        if scorer._embedding_result is not None:
+            scorer._check_embedding()
         validation = scorer.furcation.validate_adata(adata)
         _append(
             diagnostics,
@@ -148,7 +225,11 @@ def single_preflight(
             unique_values, unique_counts = np.unique(root_values, return_counts=True)
             unique_fraction = float(len(unique_values) / len(root_values))
             largest_tie_fraction = float(unique_counts.max() / len(root_values))
-            if len(unique_values) < 20 or unique_fraction < 0.05 or largest_tie_fraction > 0.20:
+            if (
+                len(unique_values) < 20
+                or unique_fraction < 0.05
+                or largest_tie_fraction > 0.20
+            ):
                 _append(
                     diagnostics,
                     "ordering_highly_discrete",
@@ -178,7 +259,11 @@ def single_preflight(
         _append(diagnostics, "ordering_invalid", "error", str(exc))
 
     if check_velocity:
-        has_graph = "velocity_graph" in adata.uns
+        has_graph = (
+            "velocity_graph" in adata.uns
+            or "velocity_graph" in adata.obsp
+            or getattr(scorer, "_transition_matrix", None) is not None
+        )
         has_vectors = scorer._projection_result is not None
         if not has_graph and not has_vectors:
             _append(
@@ -188,10 +273,16 @@ def single_preflight(
                 "No scVelo velocity graph or supplied projected velocities are available.",
             )
         else:
-            _append(diagnostics, "velocity_available", "info", "Velocity information is available.")
+            _append(
+                diagnostics,
+                "velocity_available",
+                "info",
+                "Velocity information is available.",
+            )
 
     if scorer._result is not None:
         result = scorer._result
+        _graph_diagnostics(scorer, result, diagnostics)
         root = result.root_mask
         coverage = result.projection.transition_coverage[root]
         valid = result.projection.velocity_defined[root]
@@ -207,9 +298,17 @@ def single_preflight(
         undefined = float(np.mean(~valid)) if len(valid) else 1.0
         _append(
             diagnostics,
-            "undefined_velocity",
+            (
+                "undefined_affinity"
+                if getattr(result, "scoring_mode", "instantaneous") == "future_fate"
+                else "undefined_velocity"
+            ),
             "warning" if undefined > 0.05 else "info",
-            f"Undefined root projected-velocity fraction={undefined:.3f}.",
+            (
+                f"Undefined root conditional-affinity fraction={undefined:.3f}."
+                if getattr(result, "scoring_mode", "instantaneous") == "future_fate"
+                else f"Undefined root projected-velocity fraction={undefined:.3f}."
+            ),
             undefined,
         )
         no_signal = not result.root_population_summary.composition_defined
@@ -229,7 +328,9 @@ def condition_preflight(
 ) -> PreflightReport:
     diagnostics = list(
         single_preflight(
-            scorer._scorer, ordering_metric=ordering_metric, check_velocity=check_velocity
+            scorer._scorer,
+            ordering_metric=ordering_metric,
+            check_velocity=check_velocity,
         ).diagnostics
     )
     adata = scorer.adata

@@ -9,7 +9,9 @@ import pytest
 
 anndata = pytest.importorskip("anndata")
 
-MODULE_PATH = Path(__file__).parents[1] / "benchmarks" / "v08" / "pancreas_pseudoconditions.py"
+MODULE_PATH = (
+    Path(__file__).parents[1] / "benchmarks" / "v08" / "pancreas_pseudoconditions.py"
+)
 spec = importlib.util.spec_from_file_location("pancreas_pseudoconditions", MODULE_PATH)
 module = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
@@ -50,7 +52,9 @@ def test_stratified_pseudoreplicates_assign_every_cell_and_balance_strata():
     assert len(assignments) == adata.n_obs
     assert not assignments.isna().any().any()
     assert set(adata.obs["sccs_condition"].astype(str)) == {"control", "treated"}
-    grouped = assignments.groupby(["stratum", "sccs_condition", "sccs_replicate"]).size()
+    grouped = assignments.groupby(
+        ["stratum", "sccs_condition", "sccs_replicate"]
+    ).size()
     for _, values in grouped.groupby(level=0):
         assert values.max() - values.min() <= 1
 

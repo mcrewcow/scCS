@@ -94,7 +94,9 @@ def test_constructor_accepts_furcation_object():
 
 
 def test_build_embedding_is_simplex_and_deterministic():
-    scorer = SingleScorer(make_adata(), root="root", branches=["A", "B"], obs_key="cluster")
+    scorer = SingleScorer(
+        make_adata(), root="root", branches=["A", "B"], obs_key="cluster"
+    )
     scorer.build_embedding(verbose=False)
     first = scorer.embedding
     scorer.build_embedding(verbose=False)
@@ -150,14 +152,20 @@ def test_explicit_population_mask_changes_only_summary():
 def test_score_per_subset_summarizes_root_only():
     scorer = make_fitted_scorer()
     scorer.score(write_to_adata=False, verbose=False)
-    summaries = scorer.score_per_subset("condition", population="root", min_cells=1, verbose=False)
+    summaries = scorer.score_per_subset(
+        "condition", population="root", min_cells=1, verbose=False
+    )
     assert set(summaries) == {"control", "treated"}
-    assert all(isinstance(value, PopulationCommitmentSummary) for value in summaries.values())
+    assert all(
+        isinstance(value, PopulationCommitmentSummary) for value in summaries.values()
+    )
     assert sum(value.n_cells for value in summaries.values()) == 4
 
 
 def test_load_velocity_vectors_accepts_two_fate_vx_vy():
-    scorer = SingleScorer(make_adata(), root="root", branches=["A", "B"], obs_key="cluster")
+    scorer = SingleScorer(
+        make_adata(), root="root", branches=["A", "B"], obs_key="cluster"
+    )
     scorer.build_embedding(verbose=False)
     vx = np.linspace(-1.0, 1.0, 10)
     vy = np.zeros(10)
@@ -280,8 +288,12 @@ def test_terminal_endpoint_layout_remains_available_and_display_only():
         seed=11,
     )
     assert np.std(branch[terminal], axis=0).sum() > 0
-    np.testing.assert_allclose(result.directional_affinity, before_affinity, atol=0.0, rtol=0.0)
-    np.testing.assert_allclose(result.commitment_strength, before_strength, atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(
+        result.directional_affinity, before_affinity, atol=0.0, rtol=0.0
+    )
+    np.testing.assert_allclose(
+        result.commitment_strength, before_strength, atol=0.0, rtol=0.0
+    )
 
 
 def test_terminal_branch_display_uses_frozen_fitted_ordering():
@@ -293,9 +305,9 @@ def test_terminal_branch_display_uses_frozen_fitted_ordering():
         terminal_radial_jitter=0.0,
         terminal_layout="branch",
     )
-    scorer.adata.obs["velocity_pseudotime"] = scorer.adata.obs["velocity_pseudotime"].to_numpy()[
-        ::-1
-    ]
+    scorer.adata.obs["velocity_pseudotime"] = scorer.adata.obs[
+        "velocity_pseudotime"
+    ].to_numpy()[::-1]
     after, _ = scorer._display_coordinates(
         result,
         jitter=0.0,
@@ -375,7 +387,9 @@ def test_gene_expression_star_supports_x_layer_raw_and_gene_symbols():
         "2",
         use_raw=True,
     )
-    expected_x = np.asarray(scorer.adata.X[result.embedding.selected_indices, 1]).reshape(-1)
+    expected_x = np.asarray(
+        scorer.adata.X[result.embedding.selected_indices, 1]
+    ).reshape(-1)
     expected_layer = np.asarray(
         scorer.adata.layers["counts"][result.embedding.selected_indices, 1].toarray()
     ).reshape(-1)
@@ -454,13 +468,17 @@ def test_summary_contains_commitment_language():
 
 
 def test_score_before_fit_raises():
-    scorer = SingleScorer(make_adata(), root="root", branches=["A", "B"], obs_key="cluster")
+    scorer = SingleScorer(
+        make_adata(), root="root", branches=["A", "B"], obs_key="cluster"
+    )
     with pytest.raises(RuntimeError, match="not fitted"):
         scorer.score()
 
 
 def test_fit_before_embedding_raises():
-    scorer = SingleScorer(make_adata(), root="root", branches=["A", "B"], obs_key="cluster")
+    scorer = SingleScorer(
+        make_adata(), root="root", branches=["A", "B"], obs_key="cluster"
+    )
     with pytest.raises(RuntimeError, match="build_embedding"):
         scorer.fit(transition_matrix=make_transition())
 
@@ -527,7 +545,10 @@ def test_preflight_and_direction_strength_plot():
     scorer.score(write_to_adata=False, verbose=False)
     report = scorer.preflight(ordering_metric="pseudotime")
     assert report.ok
-    assert {d.code for d in report.diagnostics} >= {"furcation_valid", "transition_coverage"}
+    assert {d.code for d in report.diagnostics} >= {
+        "furcation_valid",
+        "transition_coverage",
+    }
     fig = scorer.plot_direction_strength_map()
     assert fig.axes[0].get_xlabel() == "Directional specificity"
     import matplotlib.pyplot as plt
@@ -628,11 +649,13 @@ def test_commitment_heatmap_supports_population_annotation_strip():
         max_cells=20,
     )
     titles = {
-        axis.get_title(loc=loc) for axis in figure.axes for loc in ("left", "center", "right")
+        axis.get_title(loc=loc)
+        for axis in figure.axes
+        for loc in ("left", "center", "right")
     }
     assert "Type" in titles
     assert "Fate" in titles
-    assert any(axis.get_title() == "Directional Affinity" for axis in figure.axes)
+    assert any(axis.get_title() == "Directional affinity" for axis in figure.axes)
     plt.close(figure)
 
 
@@ -730,7 +753,9 @@ def test_furcation_velocity_pseudotime_uses_induced_graph(monkeypatch):
 
 
 def test_build_embedding_can_skip_cached_subset_and_adata_output():
-    scorer = SingleScorer(make_adata(), root="root", branches=["A", "B"], obs_key="cluster")
+    scorer = SingleScorer(
+        make_adata(), root="root", branches=["A", "B"], obs_key="cluster"
+    )
     scorer.build_embedding(
         ordering_metric="velocity_pseudotime",
         write_to_adata=False,
@@ -743,7 +768,9 @@ def test_build_embedding_can_skip_cached_subset_and_adata_output():
 
 
 def test_score_per_subset_works_without_cached_subset():
-    scorer = SingleScorer(make_adata(), root="root", branches=["A", "B"], obs_key="cluster")
+    scorer = SingleScorer(
+        make_adata(), root="root", branches=["A", "B"], obs_key="cluster"
+    )
     scorer.build_embedding(
         ordering_metric="velocity_pseudotime",
         write_to_adata=False,
@@ -790,7 +817,9 @@ def test_score_per_subset_ignores_missing_values():
         min_cells=1,
     )
     assert set(summaries) == {"early", "late"}
-    assert sum(summary.n_cells for summary in summaries.values()) == int(result.root_mask.sum())
+    assert sum(summary.n_cells for summary in summaries.values()) == int(
+        result.root_mask.sum()
+    )
 
 
 def test_projection_geometry_diagnostics_reconstruct_root_branch_velocity_exactly():
@@ -822,7 +851,9 @@ def test_projection_geometry_diagnostic_plot_smoke():
 
 
 def test_projection_geometry_diagnostics_reject_preprojected_vectors():
-    scorer = SingleScorer(make_adata(), root="root", branches=["A", "B"], obs_key="cluster")
+    scorer = SingleScorer(
+        make_adata(), root="root", branches=["A", "B"], obs_key="cluster"
+    )
     scorer.build_embedding(verbose=False)
     scorer.load_velocity_vectors(np.ones((10, 2)))
     scorer.fit(verbose=False)
@@ -855,7 +886,9 @@ def test_four_fate_auto_rose_uses_branch_direction_bins():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    labels = np.array(["root"] * 8 + [fate for fate in ["A", "B", "C", "D"] for _ in range(3)])
+    labels = np.array(
+        ["root"] * 8 + [fate for fate in ["A", "B", "C", "D"] for _ in range(3)]
+    )
     ordering = np.linspace(0.0, 1.0, len(labels))
     adata = anndata.AnnData(X=np.zeros((len(labels), 2)))
     adata.obs["cluster"] = pd.Categorical(labels)
@@ -869,7 +902,9 @@ def test_four_fate_auto_rose_uses_branch_direction_bins():
     for start in terminal_starts.values():
         transition[start : start + 3, start : start + 3] = np.eye(3)
 
-    scorer = SingleScorer(adata, root="root", branches=["A", "B", "C", "D"], obs_key="cluster")
+    scorer = SingleScorer(
+        adata, root="root", branches=["A", "B", "C", "D"], obs_key="cluster"
+    )
     scorer.build_embedding(verbose=False)
     scorer.fit(
         transition_matrix=sparse.csr_matrix(transition),
@@ -902,7 +937,9 @@ def test_commitment_heatmap_supports_multiple_row_and_fate_strips():
         max_cells=20,
     )
     titles = {
-        axis.get_title(loc=loc) for axis in figure.axes for loc in ("left", "center", "right")
+        axis.get_title(loc=loc)
+        for axis in figure.axes
+        for loc in ("left", "center", "right")
     }
     assert "Type" in titles
     assert "Branch" in titles
@@ -924,7 +961,9 @@ def test_projection_diagnostic_plot_has_branch_and_fate_strips():
         show_fate_strip=True,
     )
     titles = {
-        axis.get_title(loc=loc) for axis in figure.axes for loc in ("left", "center", "right")
+        axis.get_title(loc=loc)
+        for axis in figure.axes
+        for loc in ("left", "center", "right")
     }
     ylabels = {axis.get_ylabel() for axis in figure.axes}
     assert "Direct\nbranch" in titles
@@ -968,7 +1007,9 @@ def test_four_fate_rose_within_fate_normalization_uses_fractional_scale():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    labels = np.array(["root"] * 8 + [fate for fate in ["A", "B", "C", "D"] for _ in range(3)])
+    labels = np.array(
+        ["root"] * 8 + [fate for fate in ["A", "B", "C", "D"] for _ in range(3)]
+    )
     ordering = np.linspace(0.0, 1.0, len(labels))
     adata = anndata.AnnData(X=np.zeros((len(labels), 2)))
     adata.obs["cluster"] = pd.Categorical(labels)
@@ -982,7 +1023,9 @@ def test_four_fate_rose_within_fate_normalization_uses_fractional_scale():
     for start in terminal_starts.values():
         transition[start : start + 3, start : start + 3] = np.eye(3)
 
-    scorer = SingleScorer(adata, root="root", branches=["A", "B", "C", "D"], obs_key="cluster")
+    scorer = SingleScorer(
+        adata, root="root", branches=["A", "B", "C", "D"], obs_key="cluster"
+    )
     scorer.build_embedding(verbose=False)
     scorer.fit(
         transition_matrix=sparse.csr_matrix(transition),
@@ -1000,7 +1043,8 @@ def test_four_fate_rose_within_fate_normalization_uses_fractional_scale():
     assert heights
     assert max(heights) <= 1.0 + 1e-12
     assert any(
-        "Within-fate velocity-mass fraction" in text.get_text() for text in figure.axes[0].texts
+        "Within-fate velocity-mass fraction" in text.get_text()
+        for text in figure.axes[0].texts
     )
     plt.close(figure)
 
@@ -1106,7 +1150,9 @@ def test_branch_rose_excludes_incoming_root_direction_from_fate_labels():
     )
     axis = figure.axes[0]
     assert len(axis.patches) == 24
-    assert [tick.get_text() for tick in axis.get_xticklabels()] == list(result.fate_names)
+    assert [tick.get_text() for tick in axis.get_xticklabels()] == list(
+        result.fate_names
+    )
     legend = axis.get_legend()
     assert legend is not None
     legend_text = [text.get_text() for text in legend.get_texts()]
@@ -1191,6 +1237,7 @@ def test_commitment_heatmap_accepts_future_fate_metric_aliases():
     import matplotlib.pyplot as plt
 
     scorer = make_fitted_scorer()
+    scorer.fit_future_fate(make_transition(), min_anchor_cells=1, verbose=False)
     result = scorer.score(write_to_adata=False, verbose=False)
     figure = scorer.plot_commitment_heatmap(
         result,
@@ -1198,6 +1245,7 @@ def test_commitment_heatmap_accepts_future_fate_metric_aliases():
         population="all",
         max_cells=20,
     )
+    assert any("Conditional Fate Affinity" in a.get_title() for a in figure.axes)
     assert figure.axes
     plt.close(figure)
 
@@ -1236,5 +1284,8 @@ def test_branch_velocity_profiles_keep_terminal_populations_separate():
     visible_axes = [axis for axis in figure.axes if axis.get_visible()]
     assert len(visible_axes) == result.k
     assert all(len(axis.patches) in {0, 16} for axis in visible_axes)
-    assert all(any(name in axis.get_title() for name in result.fate_names) for axis in visible_axes)
+    assert all(
+        any(name in axis.get_title() for name in result.fate_names)
+        for axis in visible_axes
+    )
     plt.close(figure)

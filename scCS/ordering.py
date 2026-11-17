@@ -31,7 +31,9 @@ def _validate_quantile_pair(low: float, high: float, *, name: str) -> None:
         )
 
 
-def _safe_bounds(values: np.ndarray, low_q: float, high_q: float) -> tuple[float, float]:
+def _safe_bounds(
+    values: np.ndarray, low_q: float, high_q: float
+) -> tuple[float, float]:
     low = float(np.quantile(values, low_q))
     high = float(np.quantile(values, high_q))
     if not np.isfinite(low) or not np.isfinite(high):
@@ -138,7 +140,9 @@ class FurcationOrderingScaler:
         selected = validation.selected_mask
         selected_values_raw = values[selected]
         if not np.all(np.isfinite(selected_values_raw)):
-            raise ValueError("ordering contains non-finite values among selected furcation cells.")
+            raise ValueError(
+                "ordering contains non-finite values among selected furcation cells."
+            )
         selected_values = self._orient(selected_values_raw)
         selected_labels = label_values[selected]
         root_mask = furcation.masks(selected_labels)["root"]
@@ -159,7 +163,9 @@ class FurcationOrderingScaler:
         furcation: Furcation,
     ) -> FurcationOrderingResult:
         if not self.fitted_:
-            raise RuntimeError("FurcationOrderingScaler must be fit before transform().")
+            raise RuntimeError(
+                "FurcationOrderingScaler must be fit before transform()."
+            )
 
         values = _as_1d(ordering, name="ordering")
         label_values = np.asarray(labels).astype(str)
@@ -170,7 +176,9 @@ class FurcationOrderingScaler:
         selected = validation.selected_mask
         selected_values_raw = values[selected]
         if not np.all(np.isfinite(selected_values_raw)):
-            raise ValueError("ordering contains non-finite values among selected furcation cells.")
+            raise ValueError(
+                "ordering contains non-finite values among selected furcation cells."
+            )
         selected_values = self._orient(selected_values_raw)
         selected_labels = label_values[selected]
         masks = furcation.masks(selected_labels)

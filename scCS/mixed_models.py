@@ -14,7 +14,6 @@ import warnings
 
 import numpy as np
 
-
 _CRITICAL_WARNING_FRAGMENTS = (
     "singular",
     "boundary",
@@ -125,10 +124,14 @@ def fit_mixedlm_fail_closed(
     if not bool(getattr(fit, "converged", False)):
         reasons.append("optimizer did not report convergence")
     if critical_warnings:
-        reasons.append("critical statsmodels warning(s): " + " | ".join(critical_warnings))
+        reasons.append(
+            "critical statsmodels warning(s): " + " | ".join(critical_warnings)
+        )
 
     fixed_params = np.asarray(getattr(fit, "fe_params", []), dtype=float)
-    if fixed_params.shape != (n_fixed_effects,) or not np.all(np.isfinite(fixed_params)):
+    if fixed_params.shape != (n_fixed_effects,) or not np.all(
+        np.isfinite(fixed_params)
+    ):
         reasons.append("fixed-effect estimates are missing or non-finite")
 
     fixed_covariance: Optional[np.ndarray] = None
@@ -148,14 +151,23 @@ def fit_mixedlm_fail_closed(
             max_eigenvalue = float(eigenvalues.max())
             scale = max(abs(max_eigenvalue), 1.0)
             if min_eigenvalue <= covariance_rtol * scale:
-                reasons.append("fixed-effect covariance is singular or not positive definite")
+                reasons.append(
+                    "fixed-effect covariance is singular or not positive definite"
+                )
             else:
                 condition_number = float(max_eigenvalue / min_eigenvalue)
-                if not np.isfinite(condition_number) or condition_number > condition_number_limit:
-                    reasons.append("fixed-effect covariance is numerically ill-conditioned")
+                if (
+                    not np.isfinite(condition_number)
+                    or condition_number > condition_number_limit
+                ):
+                    reasons.append(
+                        "fixed-effect covariance is numerically ill-conditioned"
+                    )
             fixed_covariance = symmetric
     except Exception as exc:
-        reasons.append(f"could not evaluate fixed-effect covariance: {_format_exception(exc)}")
+        reasons.append(
+            f"could not evaluate fixed-effect covariance: {_format_exception(exc)}"
+        )
 
     random_variance_min = float("nan")
     try:
@@ -171,7 +183,9 @@ def fit_mixedlm_fail_closed(
             if random_variance_min <= covariance_rtol * re_scale:
                 reasons.append("random-effect variance is on the boundary or singular")
     except Exception as exc:
-        reasons.append(f"could not evaluate random-effect covariance: {_format_exception(exc)}")
+        reasons.append(
+            f"could not evaluate random-effect covariance: {_format_exception(exc)}"
+        )
 
     if reasons:
         audit = _invalid_audit(

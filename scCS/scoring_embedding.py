@@ -7,6 +7,7 @@ from typing import Optional, Sequence, Union
 
 import numpy as np
 
+from ._alignment import cell_indices, observation_fingerprint, observation_ids
 from .furcation import Furcation
 from .geometry import SimplexStarGeometry
 from .ordering import FurcationOrderingResult, FurcationOrderingScaler
@@ -34,6 +35,7 @@ class ScoringEmbeddingResult:
     ordering: FurcationOrderingResult
     arm_scale: float
     ordering_key: Optional[str]
+    observation_ids: Optional[np.ndarray] = None
 
     @property
     def n_selected(self) -> int:
@@ -49,21 +51,35 @@ class ScoringEmbeddingResult:
         *,
         coordinate_key: str = "X_sccs_score",
         metadata_key: str = "sccs_v08",
+        compact_metadata: bool = False,
     ) -> None:
         """Write full-length coordinates and metadata without subsetting AnnData."""
+        selected = cell_indices(adata, self.selected_cell_ids)
         full = np.full(
             (adata.n_obs, self.dimension),
             np.nan,
             dtype=float,
         )
-        full[self.selected_indices] = self.coordinates
+        full[selected] = self.coordinates
         adata.obsm[coordinate_key] = full
 
         metadata = dict(adata.uns.get(metadata_key, {}))
         metadata["fate_names"] = list(self.geometry.fate_names)
         metadata["root_direction"] = self.geometry.root_direction.tolist()
         metadata["terminal_directions"] = self.geometry.terminal_directions.tolist()
-        metadata["selected_indices"] = self.selected_indices.tolist()
+        metadata["selected_indices"] = selected
+        if compact_metadata:
+            metadata.pop("selected_cell_ids", None)
+        else:
+            metadata["selected_cell_ids"] = self.selected_cell_ids.astype(str)
+        metadata["compact_metadata"] = bool(compact_metadata)
+        metadata["target_observation_fingerprint"] = observation_fingerprint(
+            adata.obs_names
+        )
+        if self.observation_ids is not None:
+            metadata["source_observation_fingerprint"] = observation_fingerprint(
+                self.observation_ids
+            )
         metadata["arm_scale"] = float(self.arm_scale)
         metadata["ordering_key"] = self.ordering_key
         metadata["terminal_coordinate_mode"] = "fixed_vertex"
@@ -85,7 +101,9 @@ def _resolve_ordering(
         values = np.asarray(ordering, dtype=float)
         key = None
         if values.ndim != 1 or len(values) != adata.n_obs:
-            raise ValueError("Array ordering must be one-dimensional and match adata.n_obs.")
+            raise ValueError(
+                "Array ordering must be one-dimensional and match adata.n_obs."
+            )
     # Finiteness is validated after the supervised furcation mask is applied
     # by FurcationOrderingScaler. Missing values on unrelated cells are not
     # relevant to this furcation.
@@ -112,6 +130,7 @@ def build_scoring_embedding(
     if not np.isfinite(arm_scale) or arm_scale <= 0:
         raise ValueError("arm_scale must be positive and finite.")
 
+    full_ids = observation_ids(adata)
     validation = furcation.validate_adata(adata)
     labels_full = adata.obs[furcation.obs_key].astype(str).to_numpy()
     ordering_values, ordering_key = _resolve_ordering(adata, ordering)
@@ -121,7 +140,9 @@ def build_scoring_embedding(
     selected_cell_ids = np.asarray(adata.obs_names[selected_indices]).astype(str)
 
     scaler = ordering_scaler or FurcationOrderingScaler()
-    selected_ordering_values = np.asarray(ordering_values[selected_indices], dtype=float)
+    selected_ordering_values = np.asarray(
+        ordering_values[selected_indices], dtype=float
+    )
     if not scaler.higher_is_later:
         selected_ordering_values = -selected_ordering_values
     ordering_result = scaler.fit_transform(
@@ -163,6 +184,7 @@ def build_scoring_embedding(
         ordering=ordering_result,
         arm_scale=float(arm_scale),
         ordering_key=ordering_key,
+        observation_ids=full_ids,
     )
 
     if write_to_adata:

@@ -1,0 +1,14 @@
+Processing /tmp/rc2-dist-final/sccs_py-0.8.1rc2.tar.gz
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: scCS-py
+  Building wheel for scCS-py (pyproject.toml): started
+  Building wheel for scCS-py (pyproject.toml): finished with status 'done'
+  Created wheel for scCS-py: filename=sccs_py-0.8.1rc2-py3-none-any.whl size=143491 sha256=7c6f20b8f8e8564478d295296a0d97b949691f77cf0764eecf93a1ae5593b2bc
+  Stored in directory: /home/agent/.cache/pip/wheels/14/74/17/629011e9aa5d62f4b9fc685e52d0cc82a1bd985634816eb687
+Successfully built scCS-py
+Installing collected packages: scCS-py
+Successfully installed scCS-py-0.8.1rc2
+
+[notice] A new release of pip is available: 25.0.1 -> 26.3
+[notice] To update, run: python -m pip install --upgrade pip

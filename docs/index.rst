@@ -1,5 +1,5 @@
-scCS v.0.8
-==========
+scCS documentation
+==================
 
 **scCS** quantifies supervised cell-fate commitment at a manually annotated
 furcation. It combines an RNA-velocity transition graph, a continuous ordering,
@@ -39,20 +39,17 @@ and one of the complete pancreas or Schwann tutorials.
    limitations
 
 .. toctree::
-   :caption: Tutorials
    :maxdepth: 2
+   :caption: Tutorials
 
-   tutorials_single
-   tutorials_pair
-   tutorials_multi
-   tutorials_methodology
-   tutorials_downstream
-   tutorials_scalability
+   tutorials
 
 .. toctree::
    :maxdepth: 2
    :caption: Reference
 
    api
+   api_advanced
+   release_notes
    changelog
    references

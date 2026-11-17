@@ -1,31 +1,14 @@
-# Python artifacts
 __pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# Sphinx build output
-docs/build/
-docs/os/
-docs/sys/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Virtual environments
-.venv/
-env/
-
-# OS
-.DS_Store
-
-# Generated documentation and package builds
-docs/_build/
-
-# Python caches
 *.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
 .pytest_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+docs/_build/
+data/
+tutorial_outputs/
+.venv/

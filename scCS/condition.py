@@ -10,105 +10,31 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from .metrics import (
+    ALIASES,
+    FATE_METRICS,
+    SCALAR_METRICS,
+    canonical_metric,
+    metric_label,
+    resolve_metric,
+)
 from .furcation import Furcation, LabelSpec, TerminalSpec
 from .inference import percentile_interval
+from ._replicates import prepare_replicates, replicate_plot_values
 from .population import PopulationCommitmentSummary, summarize_commitment
 from .single import SingleScorer
 from .transitions import get_scvelo_transition_matrix
 
-
-_METRIC_ALIASES = {
-    "mean_commitment": "mean_commitment_contribution",
-    "future_fate_contribution": "mean_commitment_contribution",
-    "future_fate_affinity": "directional_affinity",
-    "conditional_fate_affinity": "directional_affinity",
-    "future_fate_reach": "commitment_strength",
-    "discounted_fate_reach": "commitment_strength",
-    "future_fate_entropy": "directional_entropy",
-    "future_fate_specificity": "directional_specificity",
-    "reach_supported_specificity": "specific_commitment",
-    "resolved_commitment": "specific_commitment",
-    "signed_progression": "progression_velocity",
-    "signed_ordering_flux": "progression_velocity",
-    "selected_path_coverage": "transition_coverage",
-}
-_FATE_METRICS = {
-    "mean_commitment_contribution",
-    "directional_affinity",
-    "commitment_composition",
-}
-_SCALAR_METRICS = {
-    "commitment_strength",
-    "directional_entropy",
-    "commitment_entropy",
-    "directional_specificity",
-    "nearest_fate_angle_degrees",
-    "specific_commitment",
-    "progression_velocity",
-    "transition_coverage",
-}
+_METRIC_ALIASES = ALIASES
+_FATE_METRICS = FATE_METRICS
+_SCALAR_METRICS = SCALAR_METRICS
 _PAIR_METRICS = {"pairwise_log_commitment_ratio"}
+_canonical_metric = canonical_metric
+_metric_label = metric_label
 
 
 def _safe_name(value: object) -> str:
     return str(value).replace("::", "__")
-
-
-def _canonical_metric(metric: str) -> str:
-    """Return the canonical public metric name.
-
-    Compatibility and future-fate names map onto the shared internal arrays.
-    Public documentation uses mode-specific names, while established result
-    tables remain backward compatible.
-    """
-    value = str(metric)
-    return _METRIC_ALIASES.get(value, value)
-
-
-def _metric_label(metric: str, *, fate: Optional[str] = None) -> str:
-    """Return a concise human-facing label for one requested outcome.
-
-    Future-fate aliases retain the terminology used in the public DFFP
-    documentation, while established instantaneous names remain available for
-    backward compatibility.
-    """
-    requested = str(metric)
-    public_labels = {
-        "future_fate_contribution": "Future-fate contribution",
-        "future_fate_affinity": "Conditional Fate Affinity (CFA)",
-        "conditional_fate_affinity": "Conditional Fate Affinity (CFA)",
-        "future_fate_reach": "Discounted Fate Reach (DFR)",
-        "discounted_fate_reach": "Discounted Fate Reach (DFR)",
-        "future_fate_entropy": "Future-fate entropy",
-        "future_fate_specificity": "Future-Fate Specificity (FFS)",
-        "reach_supported_specificity": "Resolved Commitment (RC)",
-        "resolved_commitment": "Resolved Commitment (RC)",
-        "signed_progression": "Signed Ordering Flux (SOF)",
-        "signed_ordering_flux": "Signed Ordering Flux (SOF)",
-        "selected_path_coverage": "Selected-path coverage",
-    }
-    if requested in public_labels:
-        label = public_labels[requested]
-    else:
-        canonical = _canonical_metric(requested)
-        labels = {
-            "mean_commitment_contribution": "Mean commitment contribution",
-            "directional_affinity": "Directional affinity",
-            "commitment_composition": "Commitment composition",
-            "commitment_strength": "Commitment strength",
-            "directional_entropy": "Directional entropy",
-            "commitment_entropy": "Commitment entropy",
-            "directional_specificity": "Directional specificity",
-            "nearest_fate_angle_degrees": "Nearest fate angle (degrees)",
-            "specific_commitment": "Specific commitment",
-            "progression_velocity": "Progression velocity",
-            "transition_coverage": "Transition coverage",
-            "pairwise_log_commitment_ratio": "Pairwise log commitment ratio",
-        }
-        label = labels.get(canonical, canonical.replace("_", " ").capitalize())
-    if fate is not None:
-        label += f" toward {fate}"
-    return label
 
 
 def _outcome_column(
@@ -128,7 +54,8 @@ def _outcome_column(
         if fate_pair is None or len(fate_pair) != 2:
             raise ValueError(f"metric={metric!r} requires fate_pair=(fate_a, fate_b).")
         return (
-            f"pairwise_log_commitment_ratio::{_safe_name(fate_pair[0])}::{_safe_name(fate_pair[1])}"
+            f"pairwise_log_commitment_ratio::{_safe_name(fate_pair[0])}"
+            f"::{_safe_name(fate_pair[1])}"
         )
     raise ValueError(
         f"Unknown metric {metric!r}. Valid metrics are "
@@ -156,7 +83,9 @@ def _block_transition_matrix(matrix, groups: np.ndarray):
     """Remove transitions between different condition/replicate groups."""
     labels = np.asarray(groups).astype(str)
     if matrix.shape != (len(labels), len(labels)):
-        raise ValueError("Transition matrix shape must match the number of AnnData cells.")
+        raise ValueError(
+            "Transition matrix shape must match the number of AnnData cells."
+        )
     try:
         from scipy import sparse
     except ImportError:  # pragma: no cover - scipy is a core dependency
@@ -199,6 +128,10 @@ class ConditionCommitmentResult:
     population_summary: PopulationCommitmentSummary
     replicate_summary: pd.DataFrame
     population: str
+    scoring_mode: str = "instantaneous"
+    unresolved_probability: Optional[np.ndarray] = None
+    competing_reach: Optional[np.ndarray] = None
+    affinity_defined: Optional[np.ndarray] = None
 
     @property
     def n_cells(self) -> int:
@@ -252,9 +185,13 @@ class ConditionScorer:
             replicate_obs_key = replicate_key
 
         if condition_obs_key not in adata.obs:
-            raise ValueError(f"condition_obs_key={condition_obs_key!r} is missing from adata.obs.")
+            raise ValueError(
+                f"condition_obs_key={condition_obs_key!r} is missing from adata.obs."
+            )
         if replicate_obs_key is not None and replicate_obs_key not in adata.obs:
-            raise ValueError(f"replicate_obs_key={replicate_obs_key!r} is missing from adata.obs.")
+            raise ValueError(
+                f"replicate_obs_key={replicate_obs_key!r} is missing from adata.obs."
+            )
 
         self.adata = adata.copy() if copy else adata
         self.condition_obs_key = condition_obs_key
@@ -285,8 +222,12 @@ class ConditionScorer:
         observed = [str(value) for value in pd.unique(selected_conditions)]
         if condition_order is None:
             if isinstance(selected_conditions.dtype, pd.CategoricalDtype):
-                category_order = [str(value) for value in selected_conditions.cat.categories]
-                conditions = [value for value in category_order if value in set(observed)]
+                category_order = [
+                    str(value) for value in selected_conditions.cat.categories
+                ]
+                conditions = [
+                    value for value in category_order if value in set(observed)
+                ]
                 self.condition_order_source = "categorical_categories"
             else:
                 # Preserve first appearance.  Alphabetical sorting can silently
@@ -319,7 +260,10 @@ class ConditionScorer:
                 f"{type(self).__name__} requires at least {self.minimum_conditions} "
                 f"conditions among selected furcation cells; found {conditions}."
             )
-        if self.maximum_conditions is not None and len(conditions) > self.maximum_conditions:
+        if (
+            self.maximum_conditions is not None
+            and len(conditions) > self.maximum_conditions
+        ):
             raise ValueError(
                 f"{type(self).__name__} requires at most {self.maximum_conditions} "
                 f"conditions among selected furcation cells; found {conditions}."
@@ -332,6 +276,7 @@ class ConditionScorer:
         self.obs_key = self._scorer.obs_key
         self._condition_results: Optional[Dict[str, ConditionCommitmentResult]] = None
         self.transition_scope = "pooled"
+        self._source_transition_matrix = None
         self._transition_scope_coverage: Optional[np.ndarray] = None
         self._transition_scope_removed_mass: Optional[np.ndarray] = None
 
@@ -360,11 +305,13 @@ class ConditionScorer:
 
     def compute_velocity(self, *args, **kwargs) -> "ConditionScorer":
         self._scorer.compute_velocity(*args, **kwargs)
+        self._source_transition_matrix = None
         self._condition_results = None
         return self
 
     def build_embedding(self, *args, **kwargs) -> "ConditionScorer":
         self._scorer.build_embedding(*args, **kwargs)
+        self._source_transition_matrix = None
         self._condition_results = None
         return self
 
@@ -375,6 +322,7 @@ class ConditionScorer:
 
     def load_velocity_vectors(self, *args, **kwargs) -> "ConditionScorer":
         self._scorer.load_velocity_vectors(*args, **kwargs)
+        self._source_transition_matrix = None
         self._condition_results = None
         return self
 
@@ -404,26 +352,42 @@ class ConditionScorer:
         """
         scope = str(transition_scope)
         if scope not in {"pooled", "condition", "replicate"}:
-            raise ValueError("transition_scope must be 'pooled', 'condition', or 'replicate'.")
-        if scope != "pooled" and self._scorer._projection_result is not None:
+            raise ValueError(
+                "transition_scope must be 'pooled', 'condition', or 'replicate'."
+            )
+        if (
+            scope != "pooled"
+            and self._scorer._vectors_loaded
+            and transition_matrix is None
+        ):
             raise ValueError(
                 "transition_scope blocking cannot be applied after projected "
                 "velocity vectors have been loaded. Build the embedding and fit "
                 "from a transition matrix instead."
             )
 
-        matrix = transition_matrix
+        if transition_matrix is not None:
+            self._source_transition_matrix = transition_matrix
+        matrix = (
+            transition_matrix
+            if transition_matrix is not None
+            else self._source_transition_matrix
+        )
         self._transition_scope_coverage = None
         self._transition_scope_removed_mass = None
         if scope != "pooled":
             if matrix is None:
                 matrix = get_scvelo_transition_matrix(self.adata)
+            if self._source_transition_matrix is None:
+                self._source_transition_matrix = matrix
             original_mass = _matrix_row_sums(matrix)
             if scope == "condition":
                 groups = self.adata.obs[self.condition_obs_key].astype(str).to_numpy()
             else:
                 if self.replicate_obs_key is None:
-                    raise ValueError("transition_scope='replicate' requires replicate_obs_key.")
+                    raise ValueError(
+                        "transition_scope='replicate' requires replicate_obs_key."
+                    )
                 groups = (
                     self.adata.obs[self.condition_obs_key].astype(str)
                     + "::"
@@ -436,7 +400,9 @@ class ConditionScorer:
             coverage[positive] = retained_mass[positive] / original_mass[positive]
             coverage[~positive] = 0.0
             self._transition_scope_coverage = coverage
-            self._transition_scope_removed_mass = np.maximum(original_mass - retained_mass, 0.0)
+            self._transition_scope_removed_mass = np.maximum(
+                original_mass - retained_mass, 0.0
+            )
 
         self._scorer.fit(transition_matrix=matrix, **kwargs)
         self.transition_scope = scope
@@ -565,7 +531,9 @@ class ConditionScorer:
                 directional_entropy=pooled.directional_entropy[mask].copy(),
                 commitment_entropy=pooled.commitment_entropy[mask].copy(),
                 directional_specificity=pooled.directional_specificity[mask].copy(),
-                nearest_fate_angle_degrees=pooled.nearest_fate_angle_degrees[mask].copy(),
+                nearest_fate_angle_degrees=pooled.nearest_fate_angle_degrees[
+                    mask
+                ].copy(),
                 specific_commitment=pooled.specific_commitment[mask].copy(),
                 progression_velocity=pooled.progression_velocity[mask].copy(),
                 transition_coverage=pooled.projection.transition_coverage[mask].copy(),
@@ -573,6 +541,18 @@ class ConditionScorer:
                 population_summary=summary,
                 replicate_summary=replicate_table,
                 population=population_name,
+                scoring_mode=self._scorer.scoring_mode,
+                unresolved_probability=(
+                    pooled.unresolved_probability[mask].copy()
+                    if self._scorer.scoring_mode == "future_fate"
+                    else None
+                ),
+                competing_reach=(
+                    pooled.competing_reach[mask].copy()
+                    if self._scorer.scoring_mode == "future_fate"
+                    else None
+                ),
+                affinity_defined=pooled.projection.velocity_defined[mask].copy(),
             )
             if verbose:
                 replicate_text = (
@@ -580,7 +560,9 @@ class ConditionScorer:
                     if replicate_ids is None
                     else f"{len(replicate_table)} replicates"
                 )
-                print(f"[scCS] {condition!r}: {n_cells} {population_name} cells; {replicate_text}.")
+                print(
+                    f"[scCS] {condition!r}: {n_cells} {population_name} cells; {replicate_text}."
+                )
 
         if eligibility_errors:
             raise ValueError(
@@ -613,27 +595,54 @@ class ConditionScorer:
                 "replicate_id": replicate_id,
                 "replicate_label": str(raw_labels[index[0]]),
                 "n_cells": int(len(index)),
-                "n_valid_projection": int(np.sum(pooled.projection.velocity_defined[index])),
-                "mean_commitment_strength": _finite_mean(pooled.commitment_strength[index]),
-                "mean_directional_entropy": _finite_mean(pooled.directional_entropy[index]),
-                "mean_commitment_entropy": _finite_mean(pooled.commitment_entropy[index]),
-                "mean_directional_specificity": _finite_mean(pooled.directional_specificity[index]),
+                "n_valid_projection": int(
+                    np.sum(pooled.projection.velocity_defined[index])
+                ),
+                "n_defined_affinity": int(
+                    np.sum(pooled.projection.velocity_defined[index])
+                ),
+                "mean_affinity_defined_fraction": float(
+                    np.mean(pooled.projection.velocity_defined[index])
+                ),
+                "mean_commitment_strength": _finite_mean(
+                    pooled.commitment_strength[index]
+                ),
+                "mean_directional_entropy": _finite_mean(
+                    pooled.directional_entropy[index]
+                ),
+                "mean_commitment_entropy": _finite_mean(
+                    pooled.commitment_entropy[index]
+                ),
+                "mean_directional_specificity": _finite_mean(
+                    pooled.directional_specificity[index]
+                ),
                 "mean_nearest_fate_angle_degrees": _finite_mean(
                     pooled.nearest_fate_angle_degrees[index]
                 ),
-                "mean_specific_commitment": _finite_mean(pooled.specific_commitment[index]),
-                "mean_progression_velocity": _finite_mean(pooled.progression_velocity[index]),
+                "mean_specific_commitment": _finite_mean(
+                    pooled.specific_commitment[index]
+                ),
+                "mean_progression_velocity": _finite_mean(
+                    pooled.progression_velocity[index]
+                ),
                 "mean_transition_coverage": _finite_mean(
                     pooled.projection.transition_coverage[index]
                 ),
             }
+            if self._scorer.scoring_mode == "future_fate":
+                row["mean_unresolved_probability"] = _finite_mean(
+                    pooled.unresolved_probability[index]
+                )
+                row["mean_competing_reach"] = _finite_mean(
+                    pooled.competing_reach[index]
+                )
             summary = summarize_commitment(pooled.commitment_contribution[index])
             for fate_index, fate in enumerate(pooled.fate_names):
                 row[_outcome_column("mean_commitment_contribution", fate=fate)] = float(
                     pooled.commitment_contribution[index, fate_index].mean()
                 )
-                row[_outcome_column("directional_affinity", fate=fate)] = float(
-                    pooled.directional_affinity[index, fate_index].mean()
+                row[_outcome_column("directional_affinity", fate=fate)] = _finite_mean(
+                    pooled.directional_affinity[index, fate_index]
                 )
                 row[_outcome_column("commitment_composition", fate=fate)] = (
                     float(summary.commitment_composition[fate_index])
@@ -684,20 +693,24 @@ class ConditionScorer:
         fate: Optional[str] = None,
         fate_pair: Optional[tuple[str, str]] = None,
     ) -> list[tuple[Optional[str], Optional[tuple[str, str]], str]]:
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         fate_names = tuple(self._require_fitted_result().fate_names)
         if metric in _FATE_METRICS:
             fates = fate_names if fate is None else (str(fate),)
             invalid = [name for name in fates if name not in fate_names]
             if invalid:
-                raise ValueError(f"Unknown fate(s): {invalid}; valid fates are {fate_names}.")
+                raise ValueError(
+                    f"Unknown fate(s): {invalid}; valid fates are {fate_names}."
+                )
             return [(name, None, _outcome_column(metric, fate=name)) for name in fates]
         if metric in _SCALAR_METRICS:
             if fate is not None or fate_pair is not None:
                 raise ValueError(f"metric={metric!r} does not use fate arguments.")
             return [(None, None, _outcome_column(metric))]
         if metric in _PAIR_METRICS:
-            pairs = list(combinations(fate_names, 2)) if fate_pair is None else [fate_pair]
+            pairs = (
+                list(combinations(fate_names, 2)) if fate_pair is None else [fate_pair]
+            )
             for pair in pairs:
                 if (
                     len(pair) != 2
@@ -705,7 +718,9 @@ class ConditionScorer:
                     or pair[0] not in fate_names
                     or pair[1] not in fate_names
                 ):
-                    raise ValueError(f"Invalid fate pair {pair!r} for fates {fate_names}.")
+                    raise ValueError(
+                        f"Invalid fate pair {pair!r} for fates {fate_names}."
+                    )
             return [
                 (None, tuple(pair), _outcome_column(metric, fate_pair=tuple(pair)))
                 for pair in pairs
@@ -726,13 +741,21 @@ class ConditionScorer:
         resample_cells_within_replicate: bool = True,
         random_state: int = 0,
         results: Optional[Mapping[str, ConditionCommitmentResult]] = None,
+        undefined_replicates: str = "raise",
+        undefined_bootstrap: str = "raise",
     ) -> pd.DataFrame:
         """Hierarchical bootstrap with replicate-first resampling."""
+        if not 0 < confidence_level < 1:
+            raise ValueError("confidence_level must lie in (0, 1).")
+        if undefined_bootstrap not in {"raise", "report"}:
+            raise ValueError("undefined_bootstrap must be 'raise' or 'report'.")
+        if condition_a == condition_b:
+            raise ValueError("condition_a and condition_b must differ.")
         if n_bootstrap < 1:
             raise ValueError("n_bootstrap must be positive.")
         chosen = self._resolve_results(results)
         metric_public = str(metric)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         condition_a = str(condition_a)
         condition_b = str(condition_b)
         if condition_a not in chosen or condition_b not in chosen:
@@ -744,7 +767,10 @@ class ConditionScorer:
         rng = np.random.default_rng(random_state)
         rows = []
         for fate_name, pair, column in specs:
-            point_table = self.replicate_table(chosen)
+            point_table, audit = prepare_replicates(
+                self.replicate_table(chosen), column, [condition_a, condition_b],
+                undefined_replicates=undefined_replicates,
+            )
             point_a = point_table.loc[point_table["condition"] == condition_a, column]
             point_b = point_table.loc[point_table["condition"] == condition_b, column]
             estimate = float(point_b.mean() - point_a.mean())
@@ -757,6 +783,9 @@ class ConditionScorer:
                     fate_pair=pair,
                     rng=rng,
                     resample_cells=resample_cells_within_replicate,
+                    eligible_replicates=point_table.loc[
+                        point_table.condition == condition_a, "replicate_id"
+                    ].to_numpy(str),
                 )
                 estimate_b = self._bootstrap_condition_mean(
                     chosen[condition_b],
@@ -765,29 +794,48 @@ class ConditionScorer:
                     fate_pair=pair,
                     rng=rng,
                     resample_cells=resample_cells_within_replicate,
+                    eligible_replicates=point_table.loc[
+                        point_table.condition == condition_b, "replicate_id"
+                    ].to_numpy(str),
                 )
                 samples[iteration] = estimate_b - estimate_a
-            interval = percentile_interval(
-                samples,
-                confidence_level=confidence_level,
-                estimate=estimate,
-            )
+            n_undefined = int(np.sum(~np.isfinite(samples)))
+            if n_undefined:
+                message = (
+                    f"{n_undefined}/{n_bootstrap} bootstrap draws are undefined for {column}; "
+                    "no draws were discarded or redrawn. Use undefined_bootstrap='report' "
+                    "to return an undefined interval with diagnostic counts."
+                )
+                if undefined_bootstrap == "raise":
+                    raise ValueError(message)
+                warnings.warn(message, UserWarning, stacklevel=2)
+                lower = upper = float("nan")
+            else:
+                interval = percentile_interval(
+                    samples, confidence_level=confidence_level, estimate=estimate
+                )
+                lower, upper = interval.lower, interval.upper
             rows.append(
                 {
+                    **audit,
+                    "n_bootstrap_undefined": n_undefined,
+                    "bootstrap_status": "undefined_draws" if n_undefined else "complete",
                     "metric": metric,
                     "metric_public": metric_public,
-                    "metric_label": _metric_label(metric_public, fate=fate_name),
+                    "metric_label": self._metric_label(metric_public, fate=fate_name),
                     "fate": fate_name,
                     "fate_a": None if pair is None else pair[0],
                     "fate_b": None if pair is None else pair[1],
                     "condition_a": condition_a,
                     "condition_b": condition_b,
                     "effect_b_minus_a": estimate,
-                    "ci_lower": interval.lower,
-                    "ci_upper": interval.upper,
-                    "confidence_level": interval.confidence_level,
-                    "n_bootstrap": interval.n_bootstrap,
-                    "resample_cells_within_replicate": bool(resample_cells_within_replicate),
+                    "ci_lower": lower,
+                    "ci_upper": upper,
+                    "confidence_level": confidence_level,
+                    "n_bootstrap": n_bootstrap,
+                    "resample_cells_within_replicate": bool(
+                        resample_cells_within_replicate
+                    ),
                 }
             )
         return pd.DataFrame(rows)
@@ -801,20 +849,36 @@ class ConditionScorer:
         fate_pair: Optional[tuple[str, str]],
         rng: np.random.Generator,
         resample_cells: bool,
+        eligible_replicates: Optional[np.ndarray] = None,
     ) -> float:
         if result.replicate_ids is None:
             raise ValueError("Replicate IDs are required for hierarchical bootstrap.")
-        unique = np.unique(result.replicate_ids)
+        if metric in {
+            "directional_affinity",
+            "directional_entropy",
+            "directional_specificity",
+        }:
+            valid = np.isfinite(self._cell_metric_vector(result, metric, fate=fate))
+        else:
+            valid = np.ones(result.n_cells, dtype=bool)
+        unique = (
+            np.unique(result.replicate_ids)
+            if eligible_replicates is None else np.asarray(eligible_replicates)
+        )
         if len(unique) < 2:
             raise ValueError("At least two replicates per condition are required.")
         selected_replicates = rng.choice(unique, size=len(unique), replace=True)
         replicate_values = []
         for replicate_id in selected_replicates:
-            indices = np.flatnonzero(result.replicate_ids == replicate_id)
+            indices = np.flatnonzero((result.replicate_ids == replicate_id) & valid)
+            if len(indices) == 0:
+                return float("nan")
             if resample_cells:
                 indices = rng.choice(indices, size=len(indices), replace=True)
             replicate_values.append(
-                self._cell_outcome(result, indices, metric, fate=fate, fate_pair=fate_pair)
+                self._cell_outcome(
+                    result, indices, metric, fate=fate, fate_pair=fate_pair
+                )
             )
         return float(np.mean(replicate_values))
 
@@ -827,7 +891,7 @@ class ConditionScorer:
         fate: Optional[str],
         fate_pair: Optional[tuple[str, str]],
     ) -> float:
-        metric = _canonical_metric(metric)
+        metric = resolve_metric(metric, result.scoring_mode)
         if len(indices) == 0:
             raise ValueError("Cannot calculate an outcome from zero cells.")
         if metric in _FATE_METRICS:
@@ -837,11 +901,22 @@ class ConditionScorer:
             if metric == "mean_commitment_contribution":
                 return float(result.commitment_contribution[indices, fate_index].mean())
             if metric == "directional_affinity":
-                return float(result.directional_affinity[indices, fate_index].mean())
+                return _finite_mean(result.directional_affinity[indices, fate_index])
             summary = summarize_commitment(result.commitment_contribution[indices])
             if not summary.composition_defined:
                 return float("nan")
             return float(summary.commitment_composition[fate_index])
+        if metric in {
+            "unresolved_probability",
+            "competing_reach",
+            "affinity_defined_fraction",
+        }:
+            values = (
+                result.affinity_defined.astype(float)
+                if metric == "affinity_defined_fraction"
+                else getattr(result, metric)
+            )
+            return _finite_mean(values[indices])
         if metric == "commitment_strength":
             return _finite_mean(result.commitment_strength[indices])
         if metric == "directional_entropy":
@@ -919,9 +994,15 @@ class ConditionScorer:
         return table.groupby(["condition", "replicate_id"], as_index=False).agg(
             n_cells=("scope_coverage", "size"),
             mean_scope_coverage=("scope_coverage", "mean"),
-            q05_scope_coverage=("scope_coverage", lambda x: float(np.quantile(x, 0.05))),
+            q05_scope_coverage=(
+                "scope_coverage",
+                lambda x: float(np.quantile(x, 0.05)),
+            ),
             mean_scope_removed_mass=("scope_removed_mass", "mean"),
-            mean_furcation_transition_coverage=("furcation_transition_coverage", "mean"),
+            mean_furcation_transition_coverage=(
+                "furcation_transition_coverage",
+                "mean",
+            ),
         )
 
     @staticmethod
@@ -932,7 +1013,7 @@ class ConditionScorer:
         fate: Optional[str] = None,
     ) -> np.ndarray:
         """Return one cell-level vector for descriptive trend plots."""
-        metric = _canonical_metric(metric)
+        metric = resolve_metric(metric, result.scoring_mode)
         if metric == "mean_commitment_contribution":
             if fate is None:
                 raise ValueError("mean_commitment_contribution requires fate.")
@@ -941,6 +1022,16 @@ class ConditionScorer:
             if fate is None:
                 raise ValueError("directional_affinity requires fate.")
             return result.directional_affinity[:, result.fate_names.index(fate)]
+        if metric in {
+            "unresolved_probability",
+            "competing_reach",
+            "affinity_defined_fraction",
+        }:
+            return (
+                result.affinity_defined.astype(float)
+                if metric == "affinity_defined_fraction"
+                else getattr(result, metric)
+            )
         if metric == "commitment_strength":
             return result.commitment_strength
         if metric == "directional_entropy":
@@ -976,7 +1067,7 @@ class ConditionScorer:
         large cell-level sample.
         """
         chosen = self._resolve_results(results)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         specs = self._outcome_specs(metric, fate=fate, fate_pair=fate_pair)
         if len(specs) != 1:
             raise ValueError("Select exactly one fate or fate pair for this plot.")
@@ -987,11 +1078,17 @@ class ConditionScorer:
 
         if ax is None:
             _, ax = plt.subplots(figsize=(6.5, 4.8))
+        tick_labels = []
         for position, condition in enumerate(self.conditions):
-            values = table.loc[table["condition"] == condition, column].dropna().to_numpy(float)
+            values, label = replicate_plot_values(table, column, condition)
+            tick_labels.append(label)
             if len(values) == 0:
                 continue
-            offsets = np.linspace(-0.08, 0.08, len(values)) if len(values) > 1 else np.array([0.0])
+            offsets = (
+                np.linspace(-0.08, 0.08, len(values))
+                if len(values) > 1
+                else np.array([0.0])
+            )
             ax.scatter(
                 np.full(len(values), position, dtype=float) + offsets,
                 values,
@@ -1011,11 +1108,11 @@ class ConditionScorer:
                     zorder=2,
                 )
         ax.set_xticks(np.arange(len(self.conditions)))
-        ax.set_xticklabels(self.conditions)
+        ax.set_xticklabels(tick_labels)
         selected_fate = fate
         if selected_fate is None and fate_pair is not None:
             selected_fate = f"{fate_pair[0]} / {fate_pair[1]}"
-        ax.set_ylabel(_metric_label(metric, fate=selected_fate))
+        ax.set_ylabel(self._metric_label(metric, fate=selected_fate))
         ax.set_title("scCS replicate-level outcomes")
         return ax.figure
 
@@ -1031,7 +1128,7 @@ class ConditionScorer:
     ):
         """Plot condition- or replicate-level fate commitment as a heatmap."""
         chosen = self._resolve_results(results)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if metric not in _FATE_METRICS:
             raise ValueError(
                 "plot_commitment_heatmap requires a fate-specific metric: "
@@ -1045,7 +1142,9 @@ class ConditionScorer:
         columns = [_outcome_column(metric, fate=fate) for fate in self.branches]
         if level == "condition":
             matrix_frame = (
-                table.groupby("condition", sort=False)[columns].mean().reindex(self.conditions)
+                table.groupby("condition", sort=False)[columns]
+                .mean()
+                .reindex(self.conditions)
             )
         else:
             matrix_frame = table.set_index("replicate_id")[columns]
@@ -1067,18 +1166,20 @@ class ConditionScorer:
         ax.set_xticklabels(self.branches, rotation=30, ha="right")
         ax.set_yticks(np.arange(len(matrix_frame)))
         ax.set_yticklabels(matrix_frame.index.astype(str))
-        title = _metric_label(metric)
+        title = self._metric_label(metric)
         if reference is not None:
             title += f" change from {reference}"
         ax.set_title(title)
-        ax.figure.colorbar(image, ax=ax, label=_metric_label(metric))
+        ax.figure.colorbar(image, ax=ax, label=self._metric_label(metric))
         if annotate and matrix_frame.size <= 120:
             values = matrix_frame.to_numpy(dtype=float)
             for row in range(values.shape[0]):
                 for column_index in range(values.shape[1]):
                     value = values[row, column_index]
                     if np.isfinite(value):
-                        ax.text(column_index, row, f"{value:.3f}", ha="center", va="center")
+                        ax.text(
+                            column_index, row, f"{value:.3f}", ha="center", va="center"
+                        )
         return ax.figure
 
     def plot_pseudotime_trends(
@@ -1097,18 +1198,22 @@ class ConditionScorer:
         if n_bins < 3:
             raise ValueError("n_bins must be at least 3.")
         chosen = self._resolve_results(results)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if pseudotime_key is None:
             candidate = self._scorer._ordering_argument
             if not isinstance(candidate, str):
-                raise ValueError("pseudotime_key is required when build_embedding used an array.")
+                raise ValueError(
+                    "pseudotime_key is required when build_embedding used an array."
+                )
             pseudotime_key = candidate
         if pseudotime_key not in self.adata.obs:
             raise KeyError(f"{pseudotime_key!r} is missing from adata.obs.")
 
         all_pt = np.concatenate(
             [
-                self.adata.obs.loc[result.cell_ids, pseudotime_key].to_numpy(dtype=float)
+                self.adata.obs.loc[result.cell_ids, pseudotime_key].to_numpy(
+                    dtype=float
+                )
                 for result in chosen.values()
             ]
         )
@@ -1123,7 +1228,9 @@ class ConditionScorer:
             finite_pt = (finite_pt - pt_min) / (pt_max - pt_min)
         edges = np.unique(np.quantile(finite_pt, np.linspace(0.0, 1.0, n_bins + 1)))
         if len(edges) < 4:
-            raise ValueError("Pseudotime has too few distinct values for trend binning.")
+            raise ValueError(
+                "Pseudotime has too few distinct values for trend binning."
+            )
         centers = 0.5 * (edges[:-1] + edges[1:])
 
         import matplotlib.pyplot as plt
@@ -1134,7 +1241,9 @@ class ConditionScorer:
             result = chosen[condition]
             if result.replicate_ids is None:
                 raise ValueError("plot_pseudotime_trends requires replicate_obs_key.")
-            pt = self.adata.obs.loc[result.cell_ids, pseudotime_key].to_numpy(dtype=float)
+            pt = self.adata.obs.loc[result.cell_ids, pseudotime_key].to_numpy(
+                dtype=float
+            )
             if scale_pseudotime:
                 pt = (pt - pt_min) / (pt_max - pt_min)
             outcome = self._cell_metric_vector(result, metric, fate=fate)
@@ -1153,8 +1262,10 @@ class ConditionScorer:
                     ax.plot(centers, curve, linewidth=1.0, alpha=0.22)
             mean_curve = np.nanmean(np.asarray(replicate_curves), axis=0)
             ax.plot(centers, mean_curve, marker="o", linewidth=2.4, label=condition)
-        ax.set_xlabel("Root pseudotime (scaled 0–1)" if scale_pseudotime else pseudotime_key)
-        ax.set_ylabel(_metric_label(metric, fate=fate))
+        ax.set_xlabel(
+            "Root pseudotime (scaled 0–1)" if scale_pseudotime else pseudotime_key
+        )
+        ax.set_ylabel(self._metric_label(metric, fate=fate))
         ax.set_title("Replicate-aware commitment trends")
         ax.legend(frameon=False)
         return ax.figure
@@ -1222,7 +1333,9 @@ class ConditionScorer:
     ):
         """Plot descriptive cell-status proportions for each condition."""
         chosen = self._resolve_results(results)
-        statuses = sorted({str(status) for result in chosen.values() for status in result.status})
+        statuses = sorted(
+            {str(status) for result in chosen.values() for status in result.status}
+        )
         proportions = np.zeros((len(self.conditions), len(statuses)), dtype=float)
         for row, condition in enumerate(self.conditions):
             values = np.asarray(chosen[condition].status).astype(str)
@@ -1256,7 +1369,9 @@ class ConditionScorer:
         pooled = self._require_fitted_result()
         condition = str(condition)
         if condition not in self.conditions:
-            raise ValueError(f"Unknown condition {condition!r}; expected one of {self.conditions}.")
+            raise ValueError(
+                f"Unknown condition {condition!r}; expected one of {self.conditions}."
+            )
         metadata = self._selected_metadata()
         mask = metadata[self.condition_obs_key].to_numpy(dtype=str) == condition
         if population == "root":
@@ -1302,6 +1417,26 @@ class ConditionScorer:
             squeeze=False,
         )
         pooled = self._require_fitted_result()
+        values = self._scorer._star_metric_values(pooled, color_by)
+        if (
+            values is not None
+            and "vmin" not in plot_star_kwargs
+            and "vmax" not in plot_star_kwargs
+        ):
+            metric = self._resolve_metric(color_by) if ":" not in color_by else color_by
+            if metric == "progression_velocity":
+                selected = np.zeros(pooled.n_cells, dtype=bool)
+                for name in self.conditions:
+                    selected |= self._condition_display_mask(
+                        name, population=population
+                    )
+                finite = np.asarray(values)[selected & np.isfinite(values)]
+                bound = max(
+                    float(np.max(np.abs(finite))) if finite.size else 0.0, 1e-12
+                )
+                plot_star_kwargs.update(vmin=-bound, vmax=bound)
+            else:
+                plot_star_kwargs.update(vmin=0.0, vmax=1.0)
         for condition, axis in zip(self.conditions, axes.ravel()):
             mask = self._condition_display_mask(condition, population=population)
             self._scorer.plot_star(
@@ -1318,6 +1453,7 @@ class ConditionScorer:
             f"scCS pooled geometry by condition ({population})",
             y=1.01,
         )
+        fig.subplots_adjust(wspace=0.50, hspace=0.35)
         return fig
 
     def plot_gene_expression_star_grid(
@@ -1503,7 +1639,7 @@ class ConditionScorer:
         standard error across biological replicates, not across cells.
         """
         chosen = self._resolve_results(results)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if metric not in _FATE_METRICS:
             raise ValueError(
                 "metric must be mean_commitment_contribution, "
@@ -1511,8 +1647,16 @@ class ConditionScorer:
             )
         table = self.replicate_table(chosen)
         columns = [_outcome_column(metric, fate=fate) for fate in self.branches]
-        means = table.groupby("condition", sort=False)[columns].mean().reindex(self.conditions)
-        sem = table.groupby("condition", sort=False)[columns].sem().reindex(self.conditions)
+        means = (
+            table.groupby("condition", sort=False)[columns]
+            .mean()
+            .reindex(self.conditions)
+        )
+        sem = (
+            table.groupby("condition", sort=False)[columns]
+            .sem()
+            .reindex(self.conditions)
+        )
 
         import matplotlib.pyplot as plt
 
@@ -1533,7 +1677,7 @@ class ConditionScorer:
             )
         ax.set_xticks(x)
         ax.set_xticklabels(self.conditions)
-        ax.set_ylabel(_metric_label(metric))
+        ax.set_ylabel(self._metric_label(metric))
         ax.set_title(title or "Replicate-level scCS condition comparison")
         if metric in {"directional_affinity", "commitment_composition"}:
             ax.set_ylim(0.0, 1.0)
@@ -1555,7 +1699,7 @@ class ConditionScorer:
         replaces it with a polar axis at the same subplot position.
         """
         chosen = self._resolve_results(results)
-        metric = _canonical_metric(metric)
+        metric = self._resolve_metric(metric)
         if metric not in _FATE_METRICS:
             raise ValueError(
                 "metric must be mean_commitment_contribution, "
@@ -1563,7 +1707,11 @@ class ConditionScorer:
             )
         table = self.replicate_table(chosen)
         columns = [_outcome_column(metric, fate=fate) for fate in self.branches]
-        means = table.groupby("condition", sort=False)[columns].mean().reindex(self.conditions)
+        means = (
+            table.groupby("condition", sort=False)[columns]
+            .mean()
+            .reindex(self.conditions)
+        )
 
         import matplotlib.pyplot as plt
 
@@ -1575,7 +1723,9 @@ class ConditionScorer:
             # panels created by ``plt.subplots``. Replace that placeholder in
             # the same figure rather than failing after a long analysis.
             figure = ax.figure
-            subplot_spec = ax.get_subplotspec() if hasattr(ax, "get_subplotspec") else None
+            subplot_spec = (
+                ax.get_subplotspec() if hasattr(ax, "get_subplotspec") else None
+            )
             bounds = ax.get_position().bounds
             ax.remove()
             if subplot_spec is not None:
@@ -1591,7 +1741,7 @@ class ConditionScorer:
             ax.fill(closed_angles, closed, alpha=0.08)
         ax.set_xticks(angles)
         ax.set_xticklabels(self.branches)
-        ax.set_title(title or _metric_label(metric), pad=18)
+        ax.set_title(title or self._metric_label(metric), pad=18)
         ax.legend(frameon=False, bbox_to_anchor=(1.25, 1.10))
         return ax.figure
 
@@ -1613,9 +1763,17 @@ class ConditionScorer:
             ax=ax,
         )
 
+    def _resolve_metric(self, metric: str) -> str:
+        return resolve_metric(metric, self._scorer.scoring_mode)
+
+    def _metric_label(self, metric: str, *, fate=None) -> str:
+        return metric_label(metric, fate=fate, scoring_mode=self._scorer.scoring_mode)
+
     def _require_fitted_result(self):
         if not self._scorer.is_fitted or self._scorer.result is None:
-            raise RuntimeError("Call build_embedding() and fit() before condition scoring.")
+            raise RuntimeError(
+                "Call build_embedding() and fit() before condition scoring."
+            )
         return self._scorer.result
 
     def _resolve_results(
