@@ -16,15 +16,15 @@ velocity. It answers a narrower question:
 
 ## Start here
 
-New to scCS? Read the **Introduction** in Read the Docs before the API pages. It explains what scCS assumes, how DFFP differs from a projected velocity vector, how to choose a scorer and ordering, and how to interpret CFA, DFR, FFS, RC, UFP, and SOF together. The **Mathematical framework** page derives the discounted hitting-probability equations and Signed Ordering Flux step by step.
+New to scCS? Read the [Introduction](https://sccs-py.readthedocs.io/en/latest/introduction.html) before the API pages. It explains what scCS assumes, how DFFP differs from a projected velocity vector, how to choose a scorer and ordering, and how to interpret CFA, DFR, FFS, RC, UFP, and SOF together. The [Mathematical framework](https://sccs-py.readthedocs.io/en/latest/mathematical_framework.html) page derives the discounted hitting-probability equations and Signed Ordering Flux step by step.
 
 Recommended learning order:
 
-1. Introduction and mathematical framework;
-2. pancreas or Schwann SingleScorer tutorial;
-3. method-selection and complex-branch tutorials;
-4. PairScorer or MultiScorer for replicate-aware conditions;
-5. downstream analysis and scalability.
+1. [Introduction](https://sccs-py.readthedocs.io/en/latest/introduction.html) and [mathematical framework](https://sccs-py.readthedocs.io/en/latest/mathematical_framework.html);
+2. [Pancreas or Schwann SingleScorer tutorial](https://sccs-py.readthedocs.io/en/latest/tutorials_single.html);
+3. [Methods and interpretation tutorials](https://sccs-py.readthedocs.io/en/latest/tutorials_methods.html);
+4. [PairScorer](https://sccs-py.readthedocs.io/en/latest/tutorials_pair.html) or [MultiScorer](https://sccs-py.readthedocs.io/en/latest/tutorials_multi.html) for replicate-aware conditions;
+5. [Downstream analysis](https://sccs-py.readthedocs.io/en/latest/tutorials_downstream.html) and [scalability](https://sccs-py.readthedocs.io/en/latest/tutorials_scalability.html).
 
 ## Two explicit scoring modes
 

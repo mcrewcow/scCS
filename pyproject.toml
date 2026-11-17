@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scCS-py"
-version = "1.0.0"
+version = "1.0.1.dev0"
 description = "Supervised single-cell commitment scoring at manually annotated furcations"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,6 +36,7 @@ Issues = "https://github.com/mcrewcow/scCS/issues"
 Changelog = "https://sccs-py.readthedocs.io/en/latest/changelog.html"
 
 [project.optional-dependencies]
+benchmarks = ["cellrank>=2.0,<3", "scvelo==0.3.4", "pandas>=1.5,<3", "nbformat>=5", "ipykernel", "pysam>=0.22"]
 velocity = ["scvelo>=0.3.4", "pandas>=1.5,<3"]
 drivers = ["statsmodels>=0.14"]
 enrichment = ["gseapy>=1.0"]

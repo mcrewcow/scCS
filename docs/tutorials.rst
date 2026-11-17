@@ -40,3 +40,6 @@ Tutorial sections
 * :doc:`tutorials_methods`: understand method choices and complex dynamics.
 * :doc:`tutorials_downstream`: investigate expression and gene associations.
 * :doc:`tutorials_scalability`: measure complete numerical workloads.
+
+* :doc:`tutorials_validation`: analytical and simulated robustness checks.
+* :doc:`tutorials_benchmarks`: AML, held-out lineage and matched-method benchmarks.

@@ -49,6 +49,8 @@ and one of the complete pancreas or Schwann tutorials.
    tutorials_methods
    tutorials_downstream
    tutorials_scalability
+   tutorials_validation
+   tutorials_benchmarks
 
 .. toctree::
    :maxdepth: 2
