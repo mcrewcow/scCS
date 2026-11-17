@@ -1,11 +1,11 @@
 Validation evidence
 ===================
 
-The historical dev34 package-backed validation used dynamical pancreas velocity and
+Package-backed validation used dynamical pancreas velocity and
 independent deterministic and dynamical velocity fits on the RegVelo Schwann
 dataset.
 
-Historical benchmark evidence
+Benchmark evidence
 -----------------------------
 
 Across pancreas and both Schwann velocity models, root CFA was stable between
@@ -45,12 +45,37 @@ cells on the available host. The 200-million-cell full graph solve was marked
 ``SKIPPED_INSUFFICIENT_MEMORY`` rather than replaced by chunking. The separate
 high-memory runner is required for a direct 200-million-cell full-solve claim.
 
-Current release validation
----------------------------
+Software and tutorial checks
+----------------------------
 
-The historical results above are separate from the current rc2 execution record.
-The source archive's ``RELEASE_VALIDATION.md`` records tests, notebook executions,
-documentation/package builds and validation limits. Tutorials include reviewed
-executed outputs. Synthetic condition perturbations remain software examples,
-not biological treatment experiments. See :doc:`release_notes` for behavior
-changes and :doc:`condition_inference` for replicate eligibility rules.
+The release source passes 216 automated tests on Python 3.12. Repository-wide
+linting includes notebook sources, and documentation builds treat warnings as
+errors. The wheel and source distribution are built separately from the full
+repository; they omit notebook media.
+
+All twelve distributed notebooks contain recorded executed outputs, with 132
+embedded figures. Their environment output identifies the package and dependency
+versions used for those executions. Release preparation updated notebook setup
+and formatting while retaining the scientific calculations and recorded figures.
+The tutorial files and documentation copies are synchronized.
+
+Independent fixed-point calculations on four complete audited graphs agreed
+with scCS fate probabilities within ``6e-11``. Signed ordering flux matched a
+separate calculation using average ranks for ties. These checks validate scoring
+on the supplied graphs, separately from velocity preprocessing.
+
+Fresh sensitivity checks gave mean deterministic/dynamical Schwann CFA
+divergence ``0.015043`` and SOF Spearman correlation ``0.951161``. Horizon and
+anchor-quantile stability criteria passed. FFS correlation ``0.742901`` is
+descriptive rather than an acceptance criterion.
+
+The successful fresh Schwann preprocessing used a lossless H5AD checkpoint
+between kinetic fitting and velocity calculation. This does not establish that
+a single cold-cache notebook process fits within a small memory budget.
+Standard scalability tutorial executions stop at one million cells; their 200M
+rows report ``NOT_REQUESTED``. Synthetic numerical benchmarks exclude velocity
+fitting, AnnData copies, identifier storage and full score export, and therefore
+do not establish a 200M-cell end-to-end biological workflow.
+
+See :doc:`limitations` for interpretation and computational scope, and
+:doc:`condition_inference` for replicate eligibility rules.

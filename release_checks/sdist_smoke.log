@@ -1,5 +1,0 @@
-/tmp/rc2_distribution_smoke.py:20: RuntimeWarning: Condition 'C' contains only 3 biological replicates. Formal inference is available but has limited resolution; at least 4 and preferably 5-6 replicates per condition are recommended.
-  s.score_all_conditions(write_to_adata=False,verbose=False)
-/tmp/rc2_distribution_smoke.py:20: RuntimeWarning: Condition 'T' contains only 3 biological replicates. Formal inference is available but has limited resolution; at least 4 and preferably 5-6 replicates per condition are recommended.
-  s.score_all_conditions(write_to_adata=False,verbose=False)
-PASS 0.8.1rc2 /tmp/sccs-rc2-sdist-final/scCS/__init__.py strict eligibility, explicit exclusions, scoring and compact export

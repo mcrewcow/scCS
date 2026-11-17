@@ -1,6 +1,6 @@
 """scCS — supervised single-cell commitment scoring at annotated furcations.
 
-v0.8 is a breaking scientific redesign.  The lightweight mathematical core is
+The lightweight mathematical core is
 imported eagerly; dependency-heavy scorer and plotting modules are imported
 lazily when requested.
 """
