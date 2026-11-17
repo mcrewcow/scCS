@@ -1,6 +1,18 @@
 Changelog
 =========
 
+1.0.1 (in development)
+----------------------
+
+* Link the README learning path directly to the relevant documentation pages.
+* Add executed graph validation, robustness and replicate-inference notebooks.
+* Add an audited single-patient AML treatment pilot, a clone-held-out LARRY
+  benchmark and matched-graph CellRank comparisons.
+* Document neuroblastoma velocity-input requirements and add a tagged-BAM audit.
+* Skip the optional scVelo plotting test when scVelo is absent.
+
+Scientific scoring definitions and existing supported calls are unchanged.
+
 1.0.0 — 2026-11-16
 ------------------
 

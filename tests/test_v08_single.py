@@ -972,6 +972,7 @@ def test_projection_diagnostic_plot_has_branch_and_fate_strips():
 
 
 def test_display_velocity_projection_and_star_plots_smoke():
+    pytest.importorskip("scvelo")
     matplotlib = pytest.importorskip("matplotlib")
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

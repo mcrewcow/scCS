@@ -8,8 +8,7 @@ message: Please cite the software repository and the exact package version used.
 repository-code: https://github.com/mcrewcow/scCS
 url: https://sccs-py.readthedocs.io/
 license: MIT
-version: 1.0.0
-date-released: 2026-11-16
+version: 1.0.1.dev0
 references:
   - type: article
     title: "Single-cell transcriptomics reveals reversible microglia/macrophage activation after human retinal neuron transplantation into mouse retina"

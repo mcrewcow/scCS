@@ -1,8 +1,8 @@
 Installation
-============
+===============
 
 Package installation
---------------------
+-----------------------
 
 .. code-block:: bash
 
@@ -21,7 +21,7 @@ For all optional analysis features:
    pip install "scCS-py[all]"
 
 Tutorial environment
---------------------
+-----------------------
 
 Clone or download the source repository, then open a terminal in the directory
 containing ``pyproject.toml``. The supplied environment reproduces the tested
@@ -73,7 +73,7 @@ memory requirements. The standard scalability profile stops at one million
 cells; the exact 200-million-cell profile requires a separate high-memory host.
 
 Development and documentation
------------------------------
+--------------------------------
 
 .. code-block:: bash
 
@@ -82,3 +82,20 @@ Development and documentation
 The future-fate solver uses the transition matrix already present in the
 AnnData object or a transition matrix supplied directly. scVelo is needed only
 when scCS is asked to obtain or calculate RNA-velocity quantities itself.
+
+Validation and benchmark notebooks
+-------------------------------------
+
+The validation notebooks use the real installed package and fixed random seeds.
+The real-data notebooks download versioned public data outside the source tree.
+To include the optional CellRank comparisons and BAM input audit:
+
+.. code-block:: bash
+
+   python -m pip install -e ".[tutorials,benchmarks]"
+   python -m ipykernel install --user --name sccs-validation --display-name "scCS validation"
+
+Select the **scCS validation** kernel. See :doc:`tutorials_validation` and
+:doc:`tutorials_benchmarks` for design assumptions, runtime and data requirements.
+A velocyto CLI and correctly aligned inputs are needed separately to generate
+new neuroblastoma loom files; the benchmark extra does not create those inputs.
