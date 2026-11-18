@@ -45,7 +45,11 @@ def geo_file(directory, name):
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as tmp:
         temp = Path(tmp.name)
     try:
-        with urllib.request.urlopen(url, timeout=120) as response, gzip.GzipFile(fileobj=response) as src, temp.open("wb") as dest:
+        with (
+            urllib.request.urlopen(url, timeout=120) as response,
+            gzip.GzipFile(fileobj=response) as src,
+            temp.open("wb") as dest,
+        ):
             shutil.copyfileobj(src, dest)
         if digest(temp) != HASHES[name]:
             raise ValueError(f"Checksum mismatch for {url}")
@@ -91,10 +95,19 @@ def b_cell_metadata(h, names, ids):
     b = positive[IDENTITY].sum(axis=1)
     secretory = positive[SECRETORY].sum(axis=1)
     plasma = secretory.ge(2) & positive[REGULATORS].any(axis=1)
-    pre = positive.Irf4 & positive.Prdm1 & ~positive[["Cd40","Sdc1","Tnfrsf17"]].any(axis=1) & secretory.le(1)
+    pre = (
+        positive.Irf4
+        & positive.Prdm1
+        & ~positive[["Cd40", "Sdc1", "Tnfrsf17"]].any(axis=1)
+        & secretory.le(1)
+    )
     activated = b.ge(2) & positive[ACTIVATION].sum(axis=1).ge(2) & ~positive.Prdm1 & secretory.le(1)
     qc = (detected >= 300) & (mito <= .2 * depth)
-    states = np.select([plasma, pre, activated], ["Plasma-like", "Pre-plasma-like", "Activated B"], default="Other B")
+    states = np.select(
+        [plasma, pre, activated],
+        ["Plasma-like", "Pre-plasma-like", "Activated B"],
+        default="Other B",
+    )
     obs = pd.DataFrame({"state": states, "keep": qc & (b.ge(2) | plasma | pre),
                         "spliced_depth": depth, "detected_genes": detected}, index=ids)
     obs["strict_plasma"] = plasma & positive.Prdm1 & positive[["Jchain", "Sdc1"]].any(axis=1)
@@ -141,7 +154,9 @@ def load_case(case, directory):
                 obs = meta.reindex(ids).copy()
                 obs["state"] = obs.annot
                 obs["condition"] = np.where(obs.devtime.eq("E16.5"), "E16.5", "E12.5-E14.5")
-                obs["keep"] = obs.location.eq("Adrenal") & obs.devtime.isin(["E12.5","E13.5","E14.5","E16.5"])
+                obs["keep"] = obs.location.eq("Adrenal") & obs.devtime.isin(
+                    ["E12.5", "E13.5", "E14.5", "E16.5"]
+                )
             else:
                 obs = b_cell_metadata(h, genes, ids)
                 obs["condition"] = "CAG-sHBs" if int(accession[3:]) <= 7245823 else "WT"
@@ -152,15 +167,24 @@ def load_case(case, directory):
             if not adrenal:
                 sampled = []
                 for state, group in eligible.groupby("state", sort=True):
-                    cap = {"Activated B": 150, "Pre-plasma-like": 120, "Plasma-like": 120, "Other B": 250}[state]
+                    cap = {
+                        "Activated B": 150,
+                        "Pre-plasma-like": 120,
+                        "Plasma-like": 120,
+                        "Other B": 250,
+                    }[state]
                     sampled.extend(rng.choice(group.index, min(cap, len(group)), replace=False))
                 selected = pd.Index(sampled)
             positions = np.flatnonzero(ids.isin(selected))
             input_rows.append((accession,len(ids),len(eligible),len(positions)))
             if len(positions):
                 layers = count_layers(h, positions)
-                part = ad.AnnData(X=layers["spliced"].copy(), layers=layers, obs=obs.iloc[positions].copy(),
-                                  var=pd.DataFrame({"symbol": genes}, index=stable))
+                part = ad.AnnData(
+                    X=layers["spliced"].copy(),
+                    layers=layers,
+                    obs=obs.iloc[positions].copy(),
+                    var=pd.DataFrame({"symbol": genes}, index=stable),
+                )
                 parts.append(part)
     if adrenal:
         assert len(observed_ids) == len(set(observed_ids)) == len(meta)
@@ -174,12 +198,21 @@ def load_case(case, directory):
 
 
 def model_genes(obj, n_genes=1500):
-    """Rank measured, shared genes on spliced overdispersion, excluding Ig, ribosomal and mitochondrial genes."""
+    """Rank shared genes by spliced overdispersion.
+
+    Exclude immunoglobulin, ribosomal and mitochondrial genes.
+    """
     s, u = obj.layers["spliced"], obj.layers["unspliced"]
     mean = np.asarray(s.mean(axis=0)).ravel()
     variance = np.asarray(s.power(2).mean(axis=0)).ravel() - mean**2
-    coverage = (np.asarray((s > 0).sum(axis=0)).ravel() >= 10) & (np.asarray((u > 0).sum(axis=0)).ravel() >= 10)
-    exclude = obj.var.symbol.str.match(r"^(mt-|Rp[ls][0-9]|Ig[hkl][vdjcmgaek])", case=False).to_numpy()
+    coverage = (np.asarray((s > 0).sum(axis=0)).ravel() >= 10) & (
+        np.asarray((u > 0).sum(axis=0)).ravel() >= 10
+    )
+    exclude = obj.var.symbol.str.match(
+        r"^(mt-|Rp[ls][0-9]|Ig[hkl][vdjcmgaek])", case=False
+    ).to_numpy()
     candidates = np.flatnonzero(coverage & ~exclude)
-    top = candidates[np.argsort(-(variance[candidates] / (mean[candidates] + 1)), kind="stable")[:n_genes]]
+    top = candidates[
+        np.argsort(-(variance[candidates] / (mean[candidates] + 1)), kind="stable")[:n_genes]
+    ]
     return obj[:, np.sort(top)].copy()
