@@ -2,6 +2,7 @@ include LICENSE README.md pyproject.toml CITATION.cff
 include constraints-tutorials.txt environment-tutorials.yml
 recursive-include tests *.py
 recursive-include benchmarks *.py *.slurm
+include benchmarks/validation/pair_case_checksums.json
 recursive-include scCS py.typed
 prune docs
 prune tutorials

@@ -26,6 +26,8 @@ Recommended learning order:
 4. [PairScorer](https://sccs-py.readthedocs.io/en/latest/tutorials_pair.html) or [MultiScorer](https://sccs-py.readthedocs.io/en/latest/tutorials_multi.html) for replicate-aware conditions;
 5. [Downstream analysis](https://sccs-py.readthedocs.io/en/latest/tutorials_downstream.html) and [scalability](https://sccs-py.readthedocs.io/en/latest/tutorials_scalability.html).
 
+For interpretation beyond the standard workflow, explore [Non-trivial questions](https://sccs-py.readthedocs.io/en/latest/tutorials_validation.html): abundance versus fate affinity, horizon and anchor choices, reversible dynamics, uncertainty, and the relationship to CellRank. The [PairScorer tutorials](https://sccs-py.readthedocs.io/en/latest/tutorials_pair.html) include AML and LARRY analyses, a [chromaffin maturation comparison](https://sccs-py.readthedocs.io/en/latest/tutorials/21_akkuratova_faure_pair_scorer.html), and a [B-cell differentiation comparison](https://sccs-py.readthedocs.io/en/latest/tutorials/22_gse230862_pair_scorer.html). All four start from measured spliced and unspliced counts.
+
 ## Two explicit scoring modes
 
 scCS keeps two scientifically different questions separate.

@@ -35,11 +35,11 @@ Tutorial sections
 -----------------
 
 * :doc:`tutorials_single`: score and visualize one furcation.
-* :doc:`tutorials_pair`: compare two conditions using biological replicates.
+* :doc:`tutorials_pair`: compare conditions, including complete AML and LARRY
+  workflows starting from genuine splicing counts.
 * :doc:`tutorials_multi`: compare three or more conditions.
 * :doc:`tutorials_methods`: understand method choices and complex dynamics.
 * :doc:`tutorials_downstream`: investigate expression and gene associations.
 * :doc:`tutorials_scalability`: measure complete numerical workloads.
-
-* :doc:`tutorials_validation`: analytical and simulated robustness checks.
-* :doc:`tutorials_benchmarks`: AML, held-out lineage and matched-method benchmarks.
+* :doc:`tutorials_validation`: non-trivial questions about abundance, reach,
+  reversible dynamics, uncertainty and comparisons with CellRank.

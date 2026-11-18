@@ -5,9 +5,13 @@ Changelog
 ----------------------
 
 * Link the README learning path directly to the relevant documentation pages.
-* Add executed graph validation, robustness and replicate-inference notebooks.
-* Add an audited single-patient AML treatment pilot, a clone-held-out LARRY
-  benchmark and matched-graph CellRank comparisons.
+* Add a Non-trivial questions section with executed analytical, robustness,
+  uncertainty and matched-graph CellRank notebooks, including expanded motivation
+  and interpretation guides.
+* Add full AML and LARRY PairScorer workflows from verified spliced/unspliced
+  counts, with native RNA-velocity plots, phase portraits and score diagnostics.
+  AML is a single-patient description; LARRY compares culture time points without
+  treating cells, library batches or clone barcodes as treatment replicates.
 * Document neuroblastoma velocity-input requirements and add a tagged-BAM audit.
 * Skip the optional scVelo plotting test when scVelo is absent.
 

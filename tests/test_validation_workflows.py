@@ -63,3 +63,40 @@ def test_larry_excludes_multibarcode_future_test_cells():
     assert exclude_heldout_future(time, clones, []).all()
     with pytest.raises(ValueError, match="Time labels"):
         exclude_heldout_future(time[:-1], clones, [0])
+
+
+def test_velocity_count_audit_rejects_expression_instead_of_raw_molecules():
+    import anndata as ad
+    from benchmarks.validation.velocity_inputs import audit_counts
+
+    a = ad.AnnData(sparse.csr_matrix([[2, 0], [0, 4]], dtype=float))
+    a.layers["spliced"] = a.X.copy()
+    with pytest.raises(ValueError, match="Missing genuine"):
+        audit_counts(a)
+    a.layers["unspliced"] = sparse.csr_matrix([[1, 0], [0, 1]], dtype=float)
+    assert audit_counts(a).total_counts.tolist() == [6.0, 2.0]
+    a.layers["unspliced"][0, 0] = 0.25
+    with pytest.raises(ValueError, match="raw molecule counts"):
+        audit_counts(a)
+
+
+def test_real_splicing_loom_roundtrip_and_cached_misalignment(tmp_path):
+    pytest.importorskip("loompy")
+    import anndata as ad
+    from benchmarks.validation.velocity_inputs import write_verified_loom
+
+    a = ad.AnnData(sparse.csr_matrix([[2, 0], [0, 4]], dtype=np.float32))
+    a.obs_names = ["sample1:cellA", "sample2:cellA"]
+    a.var_names = ["GeneA", "GeneB"]
+    a.obs["condition"] = ["day2", "day4"]
+    a.layers["spliced"] = a.X.copy()
+    a.layers["unspliced"] = sparse.csr_matrix([[1, 0], [0, 2]], dtype=np.float32)
+    path = write_verified_loom(a, tmp_path / "measured.loom")
+    result = ad.read_loom(path, obs_names="CellID", var_names="Gene")
+    assert result.obs_names.equals(a.obs_names)
+    assert (result.layers["unspliced"] != a.layers["unspliced"]).nnz == 0
+    assert result.obs.condition.tolist() == ["day2", "day4"]
+    changed = a.copy()
+    changed.obs_names = ["different:cellA", "sample2:cellA"]
+    with pytest.raises(ValueError, match="different cell/gene identifiers"):
+        write_verified_loom(changed, path)

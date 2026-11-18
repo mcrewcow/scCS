@@ -95,7 +95,11 @@ To include the optional CellRank comparisons and BAM input audit:
    python -m pip install -e ".[tutorials,benchmarks]"
    python -m ipykernel install --user --name sccs-validation --display-name "scCS validation"
 
-Select the **scCS validation** kernel. See :doc:`tutorials_validation` and
-:doc:`tutorials_benchmarks` for design assumptions, runtime and data requirements.
+Select the **scCS validation** kernel. See :doc:`tutorials_pair` for real-count
+workflows and :doc:`tutorials_validation`
+for the non-trivial questions, assumptions and interpretation guides. The LARRY
+count deposit is approximately 1.53 GB and is downloaded once. Its genuine
+spliced/unspliced layers are exported to a verified analysis-subset loom locally;
+neither the count deposit nor generated data files are bundled into scCS.
 A velocyto CLI and correctly aligned inputs are needed separately to generate
 new neuroblastoma loom files; the benchmark extra does not create those inputs.

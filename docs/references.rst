@@ -33,8 +33,10 @@ Validation and benchmark data
 * Ranek, Stanley and Purvis, versioned velocity datasets and preprocessing:
   https://doi.org/10.5281/zenodo.6587903. Original AML treatment data:
   https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE116481.
-* LARRY processed object distributed by CoSpar:
-  https://cospar.readthedocs.io/en/latest/cospar.datasets.hematopoiesis.html.
+* LARRY raw splicing-count object distributed with Pyro-Velocity, version 1:
+  https://doi.org/10.6084/m9.figshare.20780344.v1. The data providers report
+  dropEst/velocyto processing of the original inDrop reads:
+  https://doi.org/10.1101/2022.09.12.507691.
 * Jiang et al. (2025), *Restoring mitochondrial quantity and quality to reverse
   the Warburg effect and drive neuroblastoma differentiation*, PNAS. DOI:
   https://doi.org/10.1073/pnas.2502483122.
