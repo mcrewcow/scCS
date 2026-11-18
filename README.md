@@ -26,7 +26,7 @@ Recommended learning order:
 4. [PairScorer](https://sccs-py.readthedocs.io/en/latest/tutorials_pair.html) or [MultiScorer](https://sccs-py.readthedocs.io/en/latest/tutorials_multi.html) for replicate-aware conditions;
 5. [Downstream analysis](https://sccs-py.readthedocs.io/en/latest/tutorials_downstream.html) and [scalability](https://sccs-py.readthedocs.io/en/latest/tutorials_scalability.html).
 
-For interpretation beyond the standard workflow, explore [Non-trivial questions](https://sccs-py.readthedocs.io/en/latest/tutorials_validation.html): abundance versus fate affinity, horizon and anchor choices, reversible dynamics, uncertainty, and the relationship to CellRank. The [PairScorer tutorials](https://sccs-py.readthedocs.io/en/latest/tutorials_pair.html) include AML and LARRY analyses, a [chromaffin maturation comparison](https://sccs-py.readthedocs.io/en/latest/tutorials/21_akkuratova_faure_pair_scorer.html), and a [B-cell differentiation comparison](https://sccs-py.readthedocs.io/en/latest/tutorials/22_gse230862_pair_scorer.html). All four start from measured spliced and unspliced counts.
+For interpretation beyond the standard workflow, explore [Non-trivial questions](https://sccs-py.readthedocs.io/en/latest/tutorials_validation.html): abundance versus fate affinity, horizon and anchor choices, reversible dynamics, uncertainty, and the relationship to CellRank. The [Practical cases](https://sccs-py.readthedocs.io/en/latest/tutorials_practical.html) cover AML, LARRY, embryonic chromaffin development, B-cell differentiation and a four-arm neuroblastoma xenograft study.
 
 ## Two explicit scoring modes
 
@@ -292,7 +292,7 @@ It also contains:
 - a single-process, in-memory, no-chunking scalability notebook whose exact
   target ladder extends to 200 million cells.
 
-Each primary notebook loads its public dataset directly and prepares RNA velocity.
+The pancreas and Schwann tutorials load their public datasets and prepare RNA velocity.
 Completed preprocessing fits are cached for reuse across notebooks. The Schwann tutorials use dynamical velocity as
 their primary model. Every guide covers ordering validation, preflight diagnostics,
 discounted future-fate scoring, anchor and horizon sensitivity, population and
@@ -301,6 +301,8 @@ replicate-aware inference where applicable, and reproducible export. PairScorer 
 MultiScorer notebooks include a clearly labeled controlled demonstration mode and a
 separate real-study path requiring genuine condition and biological-replicate
 metadata.
+
+Run the Practical cases from a repository checkout. The AML, LARRY, chromaffin and B-cell notebooks download their own inputs. For neuroblastoma, run notebook 23 first to build the inputs for notebook 24. Its four-condition expression analysis runs on public GEO counts. The optional velocity comparison requires matched splicing data. Downloaded counts and generated fits stay in the local checkout and are excluded from PyPI. See the [Practical cases input guide](https://sccs-py.readthedocs.io/en/latest/tutorials_practical.html#data-needed-to-run-the-cases).
 
 The repository also contains a method-selection tutorial explaining rejected
 alternatives, a guide to complex/loop-like/retrograde branches, and the package-API

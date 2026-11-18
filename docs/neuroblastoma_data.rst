@@ -46,7 +46,7 @@ arguments. Add ``--execute`` only when those inputs are ready. The tag check is
 not a complete alignment or reference audit. Inspect the resulting loom for
 nonempty, aligned spliced/unspliced layers before analysis.
 
-Current analysis status
+Interpreting the inputs
 --------------------------
 
 No neuroblastoma loom or velocity fit is supplied by this workflow: the required
@@ -56,3 +56,26 @@ Two tumors per condition allow descriptive comparisons, but the independent
 2-versus-2 exact two-sided permutation test cannot attain p<0.05. A treatment
 claim also needs tumor-cell identity, a justified root and candidate outcomes,
 and evidence independent of the expression markers used to define them.
+
+Matched velocity counts for the four-arm comparison
+---------------------------------------------------
+
+Once the eight aligned looms are available, assemble a tab-separated table
+with columns ``tumor``, ``loom_cell_id``, ``cell_id`` and ``species``.
+Use the sample names C1, C2, R1, R2, N1, N2, RN1 and RN2 as the loom file
+stems. Obtain the cell crosswalk from barcode processing, and the species
+calls from the joint alignment. The expression cell IDs are in notebook 23's
+``expression.h5ad``. Every modeled barcode must map to a human profile in
+the same tumor. Inspect RNA-velocity confidence, phase portraits and the
+embedded field before interpreting a treatment contrast.
+
+.. code-block:: bash
+
+   python -m benchmarks.validation.neuroblastoma_velocity \
+       --expression tutorial_outputs/neuroblastoma/expression.h5ad \
+       --loom-dir /path/to/verified/looms --mapping /path/to/cell_mapping.tsv \
+       --out tutorial_outputs/neuroblastoma/velocity.h5ad
+   export SCCS_NEUROBLASTOMA_VELOCITY_H5AD="$PWD/tutorial_outputs/neuroblastoma/velocity.h5ad"
+
+Start Jupyter in this shell and run :doc:`tutorials/24_neuroblastoma_multi_scorer`
+to compare results on the expression and RNA-velocity graphs.
