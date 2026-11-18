@@ -40,3 +40,7 @@ Validation and benchmark data
 * Jiang et al. (2025), *Restoring mitochondrial quantity and quality to reverse
   the Warburg effect and drive neuroblastoma differentiation*, PNAS. DOI:
   https://doi.org/10.1073/pnas.2502483122.
+
+* Clark et al. (2019), *Single-Cell RNA-Seq Analysis of Retinal Development
+  Identifies NFI Factors as Regulating Mitotic Exit and Late-Born Cell
+  Specification*, Neuron. PMID 31128945. https://doi.org/10.1016/j.neuron.2019.04.010.

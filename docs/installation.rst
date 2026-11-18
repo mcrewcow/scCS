@@ -93,7 +93,7 @@ Run the Practical cases notebooks from a source checkout. They download public
 inputs to its ``data/`` directory and write fitted objects and tables to
 ``tutorial_outputs/``. Both directories are excluded from Git and from the
 PyPI distributions. The :doc:`case-by-case input guide <tutorials_practical>`
-lists the public sources and the run order for neuroblastoma.
+lists the public sources and the preparation steps for mouse retina.
 To include the optional CellRank comparisons and BAM input audit:
 
 .. code-block:: bash
@@ -108,4 +108,4 @@ count deposit is approximately 1.53 GB and is downloaded once. Its genuine
 spliced/unspliced layers are exported to a verified analysis-subset loom locally;
 neither the count deposit nor generated data files are bundled into scCS.
 A velocyto CLI and correctly aligned inputs are needed separately to generate
-new neuroblastoma loom files; the benchmark extra does not create those inputs.
+the retinal loom files from the six submitted BAMs. See :doc:`clark_retina_data`.

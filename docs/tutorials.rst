@@ -36,7 +36,7 @@ Tutorial sections
 
 * :doc:`tutorials_single`: score and visualize one furcation.
 * :doc:`tutorials_pair`: compare two conditions on a shared annotated fork.
-* :doc:`tutorials_practical`: work through AML, LARRY, chromaffin, B-cell and neuroblastoma studies.
+* :doc:`tutorials_practical`: work through AML, LARRY, chromaffin, B-cell and developing retina studies.
 * :doc:`tutorials_multi`: compare three or more conditions.
 * :doc:`tutorials_methods`: understand method choices and complex dynamics.
 * :doc:`tutorials_downstream`: investigate expression and gene associations.
