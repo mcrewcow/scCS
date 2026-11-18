@@ -26,7 +26,7 @@ Recommended learning order:
 4. [PairScorer](https://sccs-py.readthedocs.io/en/latest/tutorials_pair.html) or [MultiScorer](https://sccs-py.readthedocs.io/en/latest/tutorials_multi.html) for replicate-aware conditions;
 5. [Downstream analysis](https://sccs-py.readthedocs.io/en/latest/tutorials_downstream.html) and [scalability](https://sccs-py.readthedocs.io/en/latest/tutorials_scalability.html).
 
-For interpretation beyond the standard workflow, explore [Non-trivial questions](https://sccs-py.readthedocs.io/en/latest/tutorials_validation.html): abundance versus fate affinity, horizon and anchor choices, reversible dynamics, uncertainty, and the relationship to CellRank. The [Practical cases](https://sccs-py.readthedocs.io/en/latest/tutorials_practical.html) cover AML, LARRY, embryonic chromaffin development, B-cell differentiation and a four-arm neuroblastoma xenograft study.
+For interpretation beyond the standard workflow, explore [Non-trivial questions](https://sccs-py.readthedocs.io/en/latest/tutorials_validation.html): abundance versus fate affinity, horizon and anchor choices, reversible dynamics, uncertainty, and the relationship to CellRank. The [Practical cases](https://sccs-py.readthedocs.io/en/latest/tutorials_practical.html) cover AML, LARRY, embryonic chromaffin development, B-cell differentiation and developing mouse retina across four embryonic ages.
 
 ## Two explicit scoring modes
 
@@ -302,7 +302,7 @@ MultiScorer notebooks include a clearly labeled controlled demonstration mode an
 separate real-study path requiring genuine condition and biological-replicate
 metadata.
 
-Run the Practical cases from a repository checkout. The AML, LARRY, chromaffin and B-cell notebooks download their own inputs. For neuroblastoma, run notebook 23 first to build the inputs for notebook 24. Its four-condition expression analysis runs on public GEO counts. The optional velocity comparison requires matched splicing data. Downloaded counts and generated fits stay in the local checkout and are excluded from PyPI. See the [Practical cases input guide](https://sccs-py.readthedocs.io/en/latest/tutorials_practical.html#data-needed-to-run-the-cases).
+Run the Practical cases from a repository checkout. The AML, LARRY, chromaffin and B-cell notebooks download their own inputs. For mouse retina, prepare the six original BAMs with the [retina input guide](https://sccs-py.readthedocs.io/en/latest/clark_retina_data.html), then run notebook 25. Downloaded counts and generated fits stay in the local checkout and are excluded from PyPI. See the [Practical cases input guide](https://sccs-py.readthedocs.io/en/latest/tutorials_practical.html#data-needed-to-run-the-cases).
 
 The repository also contains a method-selection tutorial explaining rejected
 alternatives, a guide to complex/loop-like/retrograde branches, and the package-API

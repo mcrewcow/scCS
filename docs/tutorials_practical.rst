@@ -1,18 +1,16 @@
 Practical cases
 ===============
 
-Choose a study by its biological question and experimental unit. Each case
-identifies its starting population, the measured inputs and the conditions
-being compared. Read the condition difference alongside the number of roots
-with defined affinity and the representation of endpoints in each group.
+A population can shrink during treatment because cells mature, die or leave the
+sampled compartment. A mature population can grow while progenitors make little
+progress toward its late state. These studies start with the observed cells and
+ask which of these explanations their RNA dynamics can distinguish.
 
 Data needed to run the cases
 ----------------------------
 
 Open the notebooks from a source checkout with the :doc:`tutorial environment
-<installation>`. The checkout provides the analysis code and the sequencing-run
-manifest. Downloads go into ``data/`` and generated fits and tables go into
-``tutorial_outputs/``. For a new checkout, follow the run order below.
+<installation>`. The papers and public sequencing inputs are listed below. The retina preparation guide also works from a standalone copy of the workflow.
 
 .. list-table::
    :header-rows: 1
@@ -37,26 +35,23 @@ manifest. Downloads go into ``data/`` and generated fits and tables go into
      - Eight recipient-library looms from
        `GSE230862 <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE230862>`_
      - Run the cells in order to build the inputs for the endpoint sensitivity check.
-   * - 23–24 · Neuroblastoma
-     - Eight expression matrices with features and barcodes from
-       `GSE288099 <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE288099>`_
-     - Run 23, then 24 in the same checkout.
+   * - 25 · Embryonic mouse retina
+     - Six original Cell Ranger BAMs and matched author annotations from
+       `GSE118614 <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE118614>`_
+     - Follow :doc:`clark_retina_data`, then run 25 locally.
 
-Notebook 23 writes ``expression.h5ad`` and ``eligible_profiles.csv.gz`` to
-``tutorial_outputs/neuroblastoma/``. These are the two inputs for notebook 24's
-expression-neighborhood comparison. The repository includes the
-:download:`ENA run manifest <../tutorials/resources/GSE288099_fastq_manifest.tsv>`
-with sample assignments, read locations, file sizes and MD5 checksums for all
-24 runs. The optional RNA-velocity comparison requires eight species-verified
-looms and a barcode mapping, or the resulting matched velocity fit. See
-:doc:`neuroblastoma_data` for the input format and preparation steps.
+Blood progenitors during treatment and differentiation
+------------------------------------------------------
 
-Hematopoiesis and treatment response
-------------------------------------
+**AML.** In one treated patient, only 24 of 800 sampled cells from the mixed
+blast and immature erythroid compartment supported a late monocytic or
+erythroid assignment. All 24 favored monocytes. How much does that explain
+about the loss of blasts during treatment?
 
-AML compares a single patient's baseline and day-2 blast compartment. LARRY
-compares sampled culture days and tests how later cells support earlier fate
-assignments. Both report descriptive differences on measured velocity graphs.
+**LARRY.** In differentiating cultures, early progenitors were much more likely
+to encounter a neutrophilic state first, yet their relative access to late
+monocytic and neutrophilic cells was close to balanced. How does the first
+recognizable lineage state relate to mature descendants?
 
 .. toctree::
    :maxdepth: 1
@@ -64,12 +59,17 @@ assignments. Both report descriptive differences on measured velocity graphs.
    tutorials/18_aml_pair_scorer
    tutorials/19_larry_pair_scorer
 
-Embryonic and immune differentiation
-------------------------------------
+Adrenal maturation and the response to persistent antigen
+----------------------------------------------------------
 
-Chromaffin cells illustrate a developmentally inferred fork and the effect of
-stage-specific anchors. The B-cell case compares first arrival at two observed
-RNA states. Broader anchors change the direction of the antigen-condition contrast.
+**Chromaffin cells.** Late pro-chromaffin cells retained access to the oxygen-sensing
+state on a common developmental reference. Which mature populations were
+actually available in each embryonic window?
+
+**B cells.** Plasma-like RNA profiles were more abundant in antigen-exposed
+recipients, yet activated cells had less access to stringent late secretory
+endpoints. The difference reversed when earlier secretory states counted as
+destinations. Where along maturation does the condition difference arise?
 
 .. toctree::
    :maxdepth: 1
@@ -77,18 +77,17 @@ RNA states. Broader anchors change the direction of the antigen-condition contra
    tutorials/21_akkuratova_faure_pair_scorer
    tutorials/22_gse230862_pair_scorer
 
-Tumor differentiation across four conditions
---------------------------------------------
+Changing developmental competence in the embryonic retina
+-----------------------------------------------------------
 
-Follow eight neuroblastoma xenografts from public expression matrices to an
-explicit MultiScorer expression-neighborhood reference. Two tumors per arm
-contribute equally to the control, RA, NEN and combination comparisons.
-The study describes a maturation continuum. Its intermediate clusters and
-experimental treatment groups serve different purposes from fate branches.
+RGC production begins early in mouse retinogenesis. As amacrine and cone
+populations emerge, do cells in the same neurogenic progenitor compartment
+change their access to these destinations? Compare E12, E14, E16 and E18 on a
+common splicing-derived reference and examine what each age can resolve on its
+own. The tutorial is ready for local execution from the six looms.
 
 .. toctree::
    :maxdepth: 1
 
-   tutorials/23_neuroblastoma_inputs
-   tutorials/24_neuroblastoma_multi_scorer
-   neuroblastoma_data
+   clark_retina_data
+   tutorials/25_clark_fetal_retina_multiscorer

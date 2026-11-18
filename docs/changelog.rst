@@ -12,12 +12,14 @@ Changelog
   counts, with native RNA-velocity plots, phase portraits and score diagnostics.
   AML is a single-patient description; LARRY compares culture time points without
   treating cells, library batches or clone barcodes as treatment replicates.
-* Group the AML, LARRY, chromaffin, B-cell and neuroblastoma studies under
+* Group the AML, LARRY, chromaffin, B-cell and embryonic retina studies under
   Practical cases. PairScorer examples report signed condition differences,
   endpoint contributions and defined-root coverage.
 * Compare all four neuroblastoma xenograft treatments with MultiScorer on an
   expression-neighborhood reference and support matched velocity graphs from
   species-verified loom inputs.
+* Add a four-age local MultiScorer workflow for embryonic retinal progenitors
+  using original Cell Ranger BAMs and the authors' updated annotations.
 * Skip the optional scVelo plotting test when scVelo is absent.
 
 Scientific scoring definitions and existing supported calls are unchanged.
