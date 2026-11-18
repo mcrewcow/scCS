@@ -13,6 +13,12 @@ import pandas as pd
 from scipy import sparse
 
 SOURCES = {
+    "larry_velocity": (
+        "https://ndownloader.figshare.com/files/37028569",
+        "larry_invitro_adata_sub_raw.h5ad",
+        "md5",
+        "d618305c0ee0e41570b1147e63df332a",
+    ),
     "aml_loom": (
         "https://zenodo.org/records/6587903/files/Pollyea_merged.loom?download=1",
         "Pollyea_merged.loom",
@@ -52,7 +58,11 @@ def fetch(key, directory):
         finally:
             temporary.unlink(missing_ok=True)
     if expected:
-        digest = hashlib.new(algorithm, path.read_bytes()).hexdigest()
+        hasher = hashlib.new(algorithm)
+        with path.open("rb") as handle:
+            while block := handle.read(1024 * 1024):
+                hasher.update(block)
+        digest = hasher.hexdigest()
         if digest != expected:
             raise ValueError(f"Checksum mismatch for {name}; remove the file and retry.")
     return path
