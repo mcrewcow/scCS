@@ -46,6 +46,7 @@ and one of the complete pancreas or Schwann tutorials.
    tutorials_single
    tutorials_pair
    tutorials_multi
+   tutorials_practical
    tutorials_methods
    tutorials_downstream
    tutorials_scalability

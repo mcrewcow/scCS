@@ -27,7 +27,7 @@ The analytical examples have exact graph-level references. The manifold examples
 use prescribed vectors and sampled coordinates; they do not simulate splicing
 counts or establish the accuracy of an RNA-velocity model. Their purpose is to
 test numerical and interpretive claims under stated assumptions. For complete
-workflows starting from genuine splicing data, see :doc:`tutorials_pair`.
+workflows starting from genuine splicing data, see :doc:`tutorials_practical`.
 
 .. toctree::
    :maxdepth: 1

@@ -31,7 +31,7 @@ Python 3.12 scientific stack:
 
    conda env create -f environment-tutorials.yml
    conda activate sccs-100
-   python -m ipykernel install --user --name sccs-100 --display-name "scCS 1.0.0"
+   python -m ipykernel install --user --name sccs-100 --display-name "scCS tutorials"
    jupyter lab tutorials/
 
 Alternatively, create an environment and install the tutorial dependencies with
@@ -42,17 +42,17 @@ the supplied constraints:
    conda create -n sccs-100 -c conda-forge python=3.12 pip -y
    conda activate sccs-100
    python -m pip install -c constraints-tutorials.txt -e ".[tutorials]"
-   python -m ipykernel install --user --name sccs-100 --display-name "scCS 1.0.0"
+   python -m ipykernel install --user --name sccs-100 --display-name "scCS tutorials"
    jupyter lab tutorials/
 
-Select the **scCS 1.0.0** kernel. Check the imported package before starting:
+Select the **scCS tutorials** kernel. Check the imported package before starting:
 
 .. code-block:: bash
 
    python -c "import scCS; print(scCS.__version__); print(scCS.__file__)"
 
-The version should be ``1.0.0`` and the path should point into your source
-checkout. The editable install uses that checkout when you restart the kernel.
+The version should match ``pyproject.toml`` in your checkout, and the path
+should point into that checkout. The editable install uses that checkout when you restart the kernel.
 Conda already isolates this environment; a nested virtual environment is unnecessary.
 The tested scVelo 0.3.4 path requires ``pandas<3``. The Schwann data adapter
 does not require installing the RegVelo modeling package.
@@ -61,7 +61,9 @@ Data downloads require internet access. Run one biological notebook kernel at
 a time to avoid retaining multiple full datasets in memory. The first dynamical
 velocity fit can take tens of minutes; later notebooks reuse matching fits from
 ``data/scCS_cache/`` relative to the notebook working directory. Keep running
-notebooks from the same directory to share those caches.
+notebooks from the same directory to share those caches. Tutorial 01 accepts
+your own mouse gene sets in ``gene_sets.gmt`` in the notebook working directory
+for optional enrichment. Its scoring workflow runs without that file.
 
 Set ``SCCS_RECOMPUTE_VELOCITY=1`` before launching Jupyter to force a fresh fit.
 ``SCCS_N_JOBS`` controls parallel workers and defaults to one. The notebooks
@@ -87,7 +89,11 @@ Validation and benchmark notebooks
 -------------------------------------
 
 The validation notebooks use the real installed package and fixed random seeds.
-The real-data notebooks download versioned public data outside the source tree.
+Run the Practical cases notebooks from a source checkout. They download public
+inputs to its ``data/`` directory and write fitted objects and tables to
+``tutorial_outputs/``. Both directories are excluded from Git and from the
+PyPI distributions. The :doc:`case-by-case input guide <tutorials_practical>`
+lists the public sources and the run order for neuroblastoma.
 To include the optional CellRank comparisons and BAM input audit:
 
 .. code-block:: bash
@@ -95,7 +101,7 @@ To include the optional CellRank comparisons and BAM input audit:
    python -m pip install -e ".[tutorials,benchmarks]"
    python -m ipykernel install --user --name sccs-validation --display-name "scCS validation"
 
-Select the **scCS validation** kernel. See :doc:`tutorials_pair` for real-count
+Select the **scCS validation** kernel. See :doc:`tutorials_practical` for real-count
 workflows and :doc:`tutorials_validation`
 for the non-trivial questions, assumptions and interpretation guides. The LARRY
 count deposit is approximately 1.53 GB and is downloaded once. Its genuine
